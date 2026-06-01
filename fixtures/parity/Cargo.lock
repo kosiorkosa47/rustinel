@@ -1,0 +1,67 @@
+# Edge-case corpus for the rustinel <-> cargo-audit advisory-parity gate
+# (scripts/audit-diff.sh). Exercises prerelease ordering, multi-range patched
+# bounds, withdrawn suppression, and crates.io-only source scoping. The check
+# asserts the two tools AGREE on the advisory set, not any fixed count, so it
+# stays valid as the advisory DB evolves.
+version = 3
+
+[[package]]
+name = "parity-root"
+version = "0.0.0"
+dependencies = [
+ "anchor-lang",
+ "dirs",
+ "openssl",
+ "ring",
+ "rustls-webpki",
+ "string-interner",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "anchor-lang"
+version = "1.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "dirs"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "openssl"
+version = "0.10.0"
+source = "git+https://github.com/sfackler/rust-openssl#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[[package]]
+name = "ring"
+version = "0.17.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "rustls-webpki"
+version = "0.103.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "string-interner"
+version = "0.7.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "time"
+version = "0.2.23-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "tokio"
+version = "1.0.0"
+source = "registry+https://internal.example/index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"

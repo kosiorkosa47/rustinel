@@ -48,6 +48,27 @@ jobs:
       - name: Build (MSRV)
         run: cargo build --workspace
 
+  # Advisory-matching parity: prove rustinel reports the same advisory set as
+  # cargo-audit (the RustSec reference implementation) on the project lockfile
+  # AND an edge-case corpus (prerelease ordering, multi-range patched bounds,
+  # withdrawn suppression, crates.io-only source scoping). It asserts agreement,
+  # not a fixed count, so it stays valid as the advisory database evolves.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Fetch advisory database
+        run: cargo audit >/dev/null 2>&1 || true
+      - name: Advisory parity vs cargo-audit
+        run: |
+          scripts/audit-diff.sh Cargo.lock
+          scripts/audit-diff.sh fixtures/parity/Cargo.lock
+
   # Dogfood: rustinel analyzes its own lockfile and posts/uploads the report.
   self-scan:
     runs-on: ubuntu-latest

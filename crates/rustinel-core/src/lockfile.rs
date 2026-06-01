@@ -17,10 +17,32 @@ impl std::fmt::Display for PackageId {
     }
 }
 
+/// Canonical source string for packages resolved from the default crates.io
+/// registry. Cargo normalises crates.io to this `registry+` form in `Cargo.lock`
+/// regardless of the git/sparse fetch protocol, so it is the value seen in
+/// practice. [`CRATES_IO_SPARSE`] is accepted as well for robustness.
+pub const CRATES_IO_REGISTRY: &str = "registry+https://github.com/rust-lang/crates.io-index";
+
+/// Sparse-index source string for crates.io. Not normally written to
+/// `Cargo.lock` (cargo uses [`CRATES_IO_REGISTRY`]), but accepted defensively.
+pub const CRATES_IO_SPARSE: &str = "sparse+https://index.crates.io/";
+
 impl PackageId {
     /// A package with no `source` is a local/workspace crate, not a registry dep.
     pub fn is_local(&self) -> bool {
         self.source.is_none()
+    }
+
+    /// True only for packages sourced from the default crates.io registry.
+    ///
+    /// RustSec advisories are keyed to crates.io, so a git, path, or
+    /// alternate-registry crate that merely shares a name with an advised
+    /// crate must not be matched against it (matches cargo-audit behaviour).
+    pub fn is_crates_io(&self) -> bool {
+        matches!(
+            self.source.as_deref(),
+            Some(CRATES_IO_REGISTRY) | Some(CRATES_IO_SPARSE)
+        )
     }
 }
 
