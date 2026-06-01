@@ -1,0 +1,27 @@
+# Demo head: after a PR adds two real, currently-advised crates (rustls-webpki
+# 0.103.10, hickory-proto 0.25.2). Checksums are placeholders; advisory matching
+# is by name+version against the RustSec database.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["hickory-proto", "rustls-webpki", "serde"]
+
+[[package]]
+name = "hickory-proto"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "rustls-webpki"
+version = "0.103.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[[package]]
+name = "serde"
+version = "1.0.219"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"

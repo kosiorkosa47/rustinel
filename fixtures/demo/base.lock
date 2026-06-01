@@ -1,0 +1,14 @@
+# Demo baseline: one well-known dependency, no advisories. Real crates.io
+# version so `cargo rustinel diff` against head.lock shows a real risk increase.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["serde"]
+
+[[package]]
+name = "serde"
+version = "1.0.219"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
