@@ -1,0 +1,28 @@
+[workspace]
+members = [
+    "crates/rustinel-core",
+    "crates/rustinel-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kosiorkosa47/rustinel"
+# MSRV floor is set by our dependency tree, not by our own code:
+#   * clap 4.6 / cargo-lock 11 / indexmap 2.14 -> rustc 1.85 (+ edition-2024)
+#   * the default `online` feature pulls url -> idna -> icu 2.2 -> rustc 1.86
+# 1.86 is the highest requirement in the default-feature build graph.
+# (`--no-default-features` drops the network stack and lowers this.)
+rust-version = "1.86"
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+toml = "0.8"
+semver = "1"
+chrono = { version = "0.4", features = ["serde"] }
+cargo-lock = "11"

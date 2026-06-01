@@ -1,0 +1,10 @@
+[package]
+name = "openssl-sys"
+version = "0.9.99"
+edition = "2021"
+links = "openssl"
+license = "MIT"
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"

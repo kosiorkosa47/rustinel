@@ -1,0 +1,14 @@
+version = 3
+
+[[package]]
+name = "evil-app"
+version = "0.1.0"
+dependencies = [
+ "evil-build",
+]
+
+[[package]]
+name = "evil-build"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

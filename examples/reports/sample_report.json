@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.0",
+  "tool": {
+    "name": "rustinel",
+    "version": "0.1.0"
+  },
+  "analysis": {
+    "mode": "diff",
+    "generated_at": "2026-05-30T00:00:00Z",
+    "offline": true
+  },
+  "project": {
+    "score": 67,
+    "level": "high"
+  },
+  "diff": {
+    "base_score": 22,
+    "head_score": 67,
+    "delta": 45,
+    "added": [
+      "openssl-sys@0.9.99",
+      "cc@1.0.83"
+    ],
+    "removed": [],
+    "changed": []
+  },
+  "policy": {
+    "profile": "balanced",
+    "decision": "review_required",
+    "violations": [],
+    "warnings": []
+  },
+  "findings": [
+    {
+      "id": "native_ffi_detected",
+      "package": "openssl-sys@0.9.99",
+      "severity": "high",
+      "weight": 20,
+      "confidence": 0.9,
+      "evidence": [
+        {
+          "kind": "manifest",
+          "summary": "crate name ends with -sys and manifest declares native links"
+        }
+      ],
+      "recommendation": "Review native dependency and build process."
+    },
+    {
+      "id": "build_script_present",
+      "package": "openssl-sys@0.9.99",
+      "severity": "medium",
+      "weight": 12,
+      "confidence": 0.95,
+      "evidence": [
+        {
+          "kind": "file",
+          "path": "openssl-sys-0.9.99/build.rs"
+        }
+      ],
+      "recommendation": "Review build script before merging."
+    }
+  ]
+}

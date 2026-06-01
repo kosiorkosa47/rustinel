@@ -1,0 +1,17 @@
+# Synthetic advisory used only for rustinel tests. Not a real vulnerability.
+# Follows the RustSec advisory-db TOML layout.
+[advisory]
+id = "RUSTSEC-2099-0001"
+package = "vuln-crate"
+title = "Synthetic test advisory for rustinel"
+description = """
+This is a fabricated advisory used by rustinel's test-suite to exercise advisory
+matching offline. It does not describe any real security issue.
+"""
+date = "2099-01-01"
+cvss = "7.5"
+categories = ["memory-corruption"]
+
+[versions]
+patched = [">= 1.0.2"]
+unaffected = ["< 1.0.0"]

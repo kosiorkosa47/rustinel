@@ -1,0 +1,74 @@
+---
+source: crates/rustinel-core/tests/snapshots.rs
+expression: sarif
+---
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "rustinel",
+          "version": "0.1.0",
+          "informationUri": "https://github.com/kosiorkosa47/rustinel",
+          "rules": [
+            {
+              "id": "build_script_present",
+              "name": "Build script present",
+              "shortDescription": {
+                "text": "Build script present"
+              },
+              "help": {
+                "text": "Review the build script before merging."
+              }
+            },
+            {
+              "id": "license_detected",
+              "name": "License detected",
+              "shortDescription": {
+                "text": "License detected"
+              },
+              "help": {
+                "text": "Confirm the license is allowed by your organization policy."
+              }
+            },
+            {
+              "id": "native_ffi_detected",
+              "name": "Native FFI dependency detected",
+              "shortDescription": {
+                "text": "Native FFI dependency detected"
+              },
+              "help": {
+                "text": "Review the native dependency and its build process before merging."
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "native_ffi_detected",
+          "level": "warning",
+          "message": {
+            "text": "openssl-sys@0.9.99: crate name ends with `-sys`, a convention for native/FFI bindings"
+          }
+        },
+        {
+          "ruleId": "build_script_present",
+          "level": "note",
+          "message": {
+            "text": "openssl-sys@0.9.99: build.rs exists; the file was inspected statically and never executed"
+          }
+        },
+        {
+          "ruleId": "license_detected",
+          "level": "note",
+          "message": {
+            "text": "openssl-sys@0.9.99: declared license: MIT"
+          }
+        }
+      ]
+    }
+  ]
+}

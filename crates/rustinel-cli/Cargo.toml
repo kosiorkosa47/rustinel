@@ -1,0 +1,40 @@
+[package]
+name = "cargo-rustinel"
+version = "0.1.0"
+description = "Supply-chain risk diff CLI for Rust projects. Invoked as `cargo rustinel`."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["security", "supply-chain", "cargo", "sbom", "audit"]
+categories = ["development-tools::cargo-plugins", "command-line-utilities"]
+
+[[bin]]
+name = "cargo-rustinel"
+path = "src/main.rs"
+
+# Prebuilt-binary installation via `cargo binstall cargo-rustinel`. Expects
+# release assets named `cargo-rustinel-<target>.tar.gz` on the GitHub repo.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+bin-dir = "{ bin }{ binary-ext }"
+
+[features]
+# `online` pulls in the HTTPS client used by `--online-metadata`. It is on by
+# default for convenience, but a security-minimal, network-dependency-free
+# binary can be built with `--no-default-features`.
+default = ["online"]
+online = ["dep:ureq"]
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+rustinel-core = { path = "../rustinel-core", version = "0.1.0" }
+# HTTPS client for the (opt-in) crates.io sparse-index metadata lookup.
+# rustls TLS only; used solely against the fixed host `index.crates.io`.
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"], optional = true }

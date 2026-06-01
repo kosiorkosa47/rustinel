@@ -1,0 +1,34 @@
+version = 1
+
+[profile]
+name = "strict"
+
+[risk]
+max_project_score = 50
+max_package_score = 70
+fail_on_delta_above = 20
+warn_on_delta_above = 5
+
+[advisories]
+fail_on = ["critical", "high", "medium"]
+warn_on = ["low"]
+
+[signals]
+fail_on_yanked = true
+warn_on_build_rs = false
+require_review_on_build_rs = true
+require_review_on_native_ffi = true
+warn_on_unsafe_increase = true
+fail_on_denied_license = true
+warn_on_unknown_license = false
+fail_on_unknown_license = true
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"]
+deny = ["GPL-3.0", "AGPL-3.0", "LGPL-3.0"]
+
+[allow]
+crates = []
+
+[deny]
+crates = []

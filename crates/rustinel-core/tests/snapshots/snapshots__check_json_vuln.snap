@@ -1,0 +1,52 @@
+---
+source: crates/rustinel-core/tests/snapshots.rs
+expression: json
+---
+{
+  "schema_version": "1.0",
+  "tool": {
+    "name": "rustinel",
+    "version": "0.1.0"
+  },
+  "analysis": {
+    "mode": "check",
+    "offline": true
+  },
+  "project": {
+    "score": 30,
+    "level": "medium",
+    "max_package_score": 30,
+    "packages": [
+      {
+        "package": "vuln-crate@1.0.1",
+        "score": 30,
+        "level": "medium"
+      }
+    ]
+  },
+  "policy": {
+    "decision": "fail",
+    "profile": "balanced",
+    "violations": [
+      "RUSTSEC-2099-0001 (high) on `vuln-crate@1.0.1`"
+    ],
+    "warnings": []
+  },
+  "packages_count": 2,
+  "findings": [
+    {
+      "id": "advisory_RUSTSEC-2099-0001",
+      "package": "vuln-crate@1.0.1",
+      "severity": "high",
+      "weight": 30,
+      "confidence": 1.0,
+      "evidence": [
+        {
+          "kind": "advisory",
+          "summary": "RUSTSEC-2099-0001: Synthetic test advisory for rustinel"
+        }
+      ],
+      "recommendation": "Update to a patched version: >= 1.0.2"
+    }
+  ]
+}

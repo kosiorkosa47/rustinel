@@ -1,0 +1,102 @@
+name: rustinel
+description: Defensive supply-chain risk diff for Rust projects — posts a sticky PR comment.
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  command:
+    description: "rustinel command to run: check or diff"
+    required: false
+    default: check
+  lockfile:
+    description: Path to Cargo.lock (check mode)
+    required: false
+    default: Cargo.lock
+  base-lockfile:
+    description: Base Cargo.lock (diff mode)
+    required: false
+  head-lockfile:
+    description: Head Cargo.lock (diff mode)
+    required: false
+  policy:
+    description: Path to rustinel.toml
+    required: false
+  offline:
+    description: Run without network access
+    required: false
+    default: "false"
+  online-metadata:
+    description: Query the crates.io sparse index for yanked versions
+    required: false
+    default: "false"
+  fail-on-review-required:
+    description: Treat review_required decisions as a failure
+    required: false
+    default: "false"
+  comment:
+    description: Post/update a sticky comment on the pull request
+    required: false
+    default: "true"
+  github-token:
+    description: Token used to post the PR comment (needs pull-requests:write)
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  report-path:
+    description: Path to the generated Markdown report
+    value: rustinel-report.md
+
+runs:
+  using: composite
+  steps:
+    - name: Install rustinel
+      shell: bash
+      run: cargo install cargo-rustinel --locked || cargo install --path . --locked
+
+    - name: Run rustinel
+      id: run
+      shell: bash
+      run: |
+        set +e
+        ARGS=(rustinel "${{ inputs.command }}")
+        if [ "${{ inputs.command }}" = "diff" ]; then
+          ARGS+=(--base-lockfile "${{ inputs.base-lockfile }}" --head-lockfile "${{ inputs.head-lockfile }}")
+        else
+          ARGS+=(--lockfile "${{ inputs.lockfile }}")
+        fi
+        ARGS+=(--format markdown --output rustinel-report.md --no-timestamp)
+        [ -n "${{ inputs.policy }}" ] && ARGS+=(--policy "${{ inputs.policy }}")
+        [ "${{ inputs.offline }}" = "true" ] && ARGS+=(--offline)
+        [ "${{ inputs.online-metadata }}" = "true" ] && ARGS+=(--online-metadata)
+        [ "${{ inputs.fail-on-review-required }}" = "true" ] && ARGS+=(--fail-on-review-required)
+        cargo "${ARGS[@]}"
+        echo "exit=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Post sticky PR comment
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        MARKER="<!-- rustinel-report -->"
+        BODY="$(printf '%s\n%s\n' "$MARKER" "$(cat rustinel-report.md)")"
+        PR="${{ github.event.pull_request.number }}"
+        REPO="${{ github.repository }}"
+        EXISTING="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq "map(select(.body | startswith(\"$MARKER\"))) | .[0].id // empty")"
+        if [ -n "$EXISTING" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" >/dev/null
+          echo "Updated existing rustinel comment ($EXISTING)."
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" >/dev/null
+          echo "Posted new rustinel comment."
+        fi
+
+    - name: Enforce policy decision
+      shell: bash
+      run: |
+        # Surface the report in the job log and fail the check if rustinel did.
+        cat rustinel-report.md || true
+        exit "${{ steps.run.outputs.exit }}"

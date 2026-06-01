@@ -1,0 +1,35 @@
+version = 1
+
+[profile]
+name = "balanced"
+
+[risk]
+max_project_score = 70
+max_package_score = 85
+fail_on_delta_above = 35
+warn_on_delta_above = 10
+
+[advisories]
+fail_on = ["critical", "high"]
+warn_on = ["medium", "low"]
+ignore = []
+
+[signals]
+fail_on_yanked = true
+warn_on_build_rs = false
+require_review_on_build_rs = false
+require_review_on_native_ffi = true
+warn_on_unsafe_increase = true
+fail_on_denied_license = true
+warn_on_unknown_license = true
+fail_on_unknown_license = false
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"]
+deny = ["GPL-3.0", "AGPL-3.0"]
+
+[allow]
+crates = []
+
+[deny]
+crates = []

@@ -1,0 +1,30 @@
+[package]
+name = "rustinel-core"
+version = "0.1.0"
+description = "Defensive Rust supply-chain risk analysis: static signals, policy and risk diff for Cargo lockfiles."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+keywords = ["security", "supply-chain", "cargo", "sbom", "audit"]
+categories = ["development-tools::cargo-plugins", "development-tools"]
+# The nightly cargo-fuzz harness is a separate crate; keep it out of the package.
+exclude = ["fuzz"]
+
+[features]
+# Exposes internal parsers via `fuzz_api` for the cargo-fuzz harness. Off by
+# default; not part of the public API.
+fuzz = []
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+semver.workspace = true
+chrono.workspace = true
+cargo-lock.workspace = true
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }

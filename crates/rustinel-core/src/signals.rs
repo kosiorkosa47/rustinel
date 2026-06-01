@@ -1,0 +1,1576 @@
+use crate::errors::RustinelError;
+use crate::lockfile::{LockfileModel, Package};
+use crate::AnalysisOptions;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Evidence {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub summary: String,
+}
+
+impl Evidence {
+    pub fn new(kind: &str, summary: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            path: None,
+            summary: summary.into(),
+        }
+    }
+
+    pub fn with_path(kind: &str, path: impl Into<String>, summary: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            path: Some(path.into()),
+            summary: summary.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RiskSignal {
+    pub id: String,
+    pub package: String,
+    pub severity: Severity,
+    pub weight: u8,
+    pub confidence: f32,
+    pub evidence: Vec<Evidence>,
+    pub recommendation: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Severity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Severity::Info => "info",
+            Severity::Low => "low",
+            Severity::Medium => "medium",
+            Severity::High => "high",
+            Severity::Critical => "critical",
+        }
+    }
+}
+
+/// Collect static, metadata-based risk signals for a lockfile.
+///
+/// Security invariant: this function only *reads* files. It never executes
+/// `build.rs`, never compiles, and never runs dependency code.
+pub fn collect_basic_signals(
+    lock: &LockfileModel,
+    options: &AnalysisOptions,
+) -> Result<Vec<RiskSignal>, RustinelError> {
+    let mut signals = Vec::new();
+
+    collect_multiple_versions(lock, &mut signals);
+    collect_name_heuristics(lock, &mut signals);
+    collect_typosquat(lock, &mut signals);
+    collect_yanked(lock, options, &mut signals);
+
+    if let Some(source_root) = options.source_root() {
+        collect_source_signals(lock, &source_root, &mut signals)?;
+    }
+
+    apply_known_good_baseline(&mut signals);
+    annotate_dependency_paths(lock, &mut signals);
+    sort_signals(&mut signals);
+    Ok(signals)
+}
+
+/// Attach the "why is this here" dependency path to each actionable finding as
+/// an extra evidence entry (`kind = "path"`). Purely informational; skipped for
+/// Info-level (baseline/declared-license) findings to avoid noise.
+fn annotate_dependency_paths(lock: &LockfileModel, signals: &mut [RiskSignal]) {
+    let paths = crate::graph::dependency_paths(lock);
+    for signal in signals.iter_mut() {
+        if signal.severity <= Severity::Info {
+            continue;
+        }
+        let name = signal.package.split('@').next().unwrap_or(&signal.package);
+        if let Some(path) = paths.get(name) {
+            if path.len() >= 2 {
+                signal.evidence.push(Evidence::new(
+                    "path",
+                    format!("pulled in via: {}", crate::graph::format_path(path)),
+                ));
+            }
+        }
+    }
+}
+
+/// Emit `yanked_crate` signals for any locked package the caller flagged as
+/// yanked. Yanked status is registry truth (not a heuristic), so it is never
+/// suppressed by the known-good baseline.
+fn collect_yanked(lock: &LockfileModel, options: &AnalysisOptions, signals: &mut Vec<RiskSignal>) {
+    if options.yanked.is_empty() {
+        return;
+    }
+    for package in lock.registry_packages() {
+        let id = package.id.to_string();
+        if options.yanked.contains(&id) {
+            signals.push(RiskSignal {
+                id: "yanked_crate".into(),
+                package: id,
+                severity: Severity::Medium,
+                weight: 25,
+                confidence: 1.0,
+                evidence: vec![Evidence::new(
+                    "registry",
+                    "this exact version has been yanked from the registry",
+                )],
+                recommendation: "Update to a non-yanked version, or replace this dependency."
+                    .into(),
+            });
+        }
+    }
+}
+
+/// Stable ordering: severity desc, then signal id, then package — so that JSON
+/// and Markdown output is deterministic regardless of discovery order.
+pub fn sort_signals(signals: &mut [RiskSignal]) {
+    signals.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then_with(|| a.id.cmp(&b.id))
+            .then_with(|| a.package.cmp(&b.package))
+    });
+}
+
+fn collect_multiple_versions(lock: &LockfileModel, signals: &mut Vec<RiskSignal>) {
+    for (name, packages) in lock.by_name() {
+        // Only registry packages can legitimately appear in multiple versions.
+        let registry: Vec<&&Package> = packages.iter().filter(|p| !p.id.is_local()).collect();
+        if registry.len() > 1 {
+            for package in &registry {
+                signals.push(RiskSignal {
+                    id: "multiple_versions_same_crate".into(),
+                    package: package.id.to_string(),
+                    severity: Severity::Low,
+                    weight: 3,
+                    confidence: 1.0,
+                    evidence: vec![Evidence::with_path(
+                        "lockfile",
+                        lock.path.display().to_string(),
+                        format!(
+                            "{} distinct versions of `{name}` are present",
+                            registry.len()
+                        ),
+                    )],
+                    recommendation: "Consider deduplicating dependency versions where feasible."
+                        .into(),
+                });
+            }
+        }
+    }
+}
+
+fn collect_name_heuristics(lock: &LockfileModel, signals: &mut Vec<RiskSignal>) {
+    for package in lock.registry_packages() {
+        if package.id.name.ends_with("-sys") {
+            // Name-only FFI is a weak signal: most `-sys` crates are benign,
+            // ubiquitous platform bindings. Start Low; the manifest-confirmed
+            // `links` path (in collect_source_signals) escalates to Medium.
+            signals.push(RiskSignal {
+                id: "native_ffi_detected".into(),
+                package: package.id.to_string(),
+                severity: Severity::Low,
+                weight: 8,
+                confidence: 0.6,
+                evidence: vec![Evidence::new(
+                    "heuristic",
+                    "crate name ends with `-sys`, a convention for native/FFI bindings",
+                )],
+                recommendation:
+                    "Review the native dependency and its build process before merging.".into(),
+            });
+        }
+    }
+}
+
+/// High-profile crates frequently impersonated by typosquats. A dependency one
+/// edit away from one of these (but not itself on the list) is a likely
+/// typosquat. Curated, not exhaustive — extend as the ecosystem shifts.
+pub const POPULAR_CRATES: &[&str] = &[
+    "serde",
+    "serde_json",
+    "serde_derive",
+    "tokio",
+    "tokio-util",
+    "reqwest",
+    "hyper",
+    "rand",
+    "regex",
+    "syn",
+    "quote",
+    "proc-macro2",
+    "libc",
+    "log",
+    "env_logger",
+    "tracing",
+    "tracing-subscriber",
+    "anyhow",
+    "thiserror",
+    "clap",
+    "futures",
+    "bytes",
+    "chrono",
+    "time",
+    "uuid",
+    "itertools",
+    "rayon",
+    "crossbeam",
+    "parking_lot",
+    "once_cell",
+    "lazy_static",
+    "base64",
+    "hex",
+    "sha2",
+    "sha1",
+    "md5",
+    "digest",
+    "hmac",
+    "aes",
+    // Legitimate, widely-used crates that happen to sit one edit away from a
+    // popular crate above (`mime`↔`time`, `md-5`↔`md5`, `anes`↔`aes`). Listing
+    // them as known-good prevents false-positive typosquat flags on the real
+    // crate, while still letting a genuine typosquat *of these* be caught.
+    "mime",
+    "md-5",
+    "anes",
+    "rustls",
+    "ring",
+    "openssl",
+    "openssl-sys",
+    "native-tls",
+    "url",
+    "http",
+    "h2",
+    "mio",
+    "socket2",
+    "num",
+    "num-traits",
+    "num-bigint",
+    "bitflags",
+    "cfg-if",
+    "memchr",
+    "smallvec",
+    "indexmap",
+    "hashbrown",
+    "ahash",
+    "toml",
+    "serde_yaml",
+    "csv",
+    "flate2",
+    "zip",
+    "tar",
+    "walkdir",
+    "tempfile",
+    "dirs",
+    "which",
+    "semver",
+    "git2",
+    "nix",
+    "winapi",
+    "windows-sys",
+    "async-trait",
+    "async-std",
+    "actix-web",
+    "axum",
+    "tower",
+    "diesel",
+    "sqlx",
+    "redis",
+    "mongodb",
+    "prost",
+    "tonic",
+    "serde_urlencoded",
+    "percent-encoding",
+    "idna",
+    "unicode-normalization",
+    "getrandom",
+    "rand_core",
+    "crc32fast",
+    "miniz_oxide",
+    "backtrace",
+    "addr2line",
+    "object",
+    "gimli",
+    "wasm-bindgen",
+    "js-sys",
+    "web-sys",
+    // Web / async ecosystem
+    "tokio-stream",
+    "tower-http",
+    "tonic-build",
+    "tungstenite",
+    "tokio-tungstenite",
+    "reqwest-middleware",
+    "hyper-tls",
+    "hyper-util",
+    "rustls-pemfile",
+    "webpki-roots",
+    "trust-dns-resolver",
+    "warp",
+    "rocket",
+    "actix",
+    "actix-rt",
+    "async-channel",
+    "futures-util",
+    "futures-core",
+    "pin-project",
+    "pin-project-lite",
+    // Serialization / data
+    "bincode",
+    "rmp-serde",
+    "postcard",
+    "serde_with",
+    "serde_repr",
+    "toml_edit",
+    "ron",
+    "quick-xml",
+    "roxmltree",
+    "prost-build",
+    "protobuf",
+    "arrow",
+    "polars",
+    // CLI / config / errors
+    "clap_derive",
+    "clap_complete",
+    "structopt",
+    "argh",
+    "console",
+    "indicatif",
+    "dialoguer",
+    "color-eyre",
+    "eyre",
+    "miette",
+    "config",
+    "dotenvy",
+    "directories",
+    // Crypto / hashing
+    "blake3",
+    "blake2",
+    "sha3",
+    "ed25519-dalek",
+    "curve25519-dalek",
+    "x25519-dalek",
+    "rsa",
+    "chacha20poly1305",
+    "argon2",
+    "bcrypt",
+    "subtle",
+    "zeroize",
+    "rand_chacha",
+    // Time / numbers / text
+    "time-macros",
+    "humantime",
+    "bigdecimal",
+    "rust_decimal",
+    "ordered-float",
+    "unicode-width",
+    "unicode-segmentation",
+    "aho-corasick",
+    "regex-syntax",
+    "fancy-regex",
+    "nom",
+    "pest",
+    "logos",
+    // Async runtimes / utils
+    "async-stream",
+    "dashmap",
+    "flume",
+    "arc-swap",
+    "thread_local",
+    "num_cpus",
+    "rayon-core",
+    "crossbeam-channel",
+    "crossbeam-utils",
+    // DB / storage
+    "sea-orm",
+    "rusqlite",
+    "deadpool",
+    "r2d2",
+    "sled",
+    "rocksdb",
+    // Testing / macros
+    "proptest",
+    "quickcheck",
+    "mockall",
+    "insta",
+    "criterion",
+    "trybuild",
+    "paste",
+    "strum",
+    "derive_more",
+    "darling",
+];
+
+/// Flag dependencies whose name is exactly one edit away from a popular crate
+/// (Damerau-Levenshtein distance 1) — a likely typosquat / impersonation. The
+/// dependency itself must not be on the popular list.
+fn collect_typosquat(lock: &LockfileModel, signals: &mut Vec<RiskSignal>) {
+    for package in lock.registry_packages() {
+        let name = package.id.name.as_str();
+        if POPULAR_CRATES.contains(&name) || is_known_good(name) {
+            continue;
+        }
+        // Skip very short names — distance-1 collisions are meaningless there.
+        if name.len() < 4 {
+            continue;
+        }
+        if let Some(target) = nearest_popular(name) {
+            signals.push(RiskSignal {
+                id: "possible_typosquat".into(),
+                package: package.id.to_string(),
+                severity: Severity::Medium,
+                weight: 18,
+                confidence: 0.5,
+                evidence: vec![Evidence::new(
+                    "heuristic",
+                    format!(
+                        "crate name `{name}` is one edit away from the popular crate `{target}` — possible typosquat"
+                    ),
+                )],
+                recommendation:
+                    "Confirm this is the crate you intended; verify the publisher and source before depending on it."
+                        .into(),
+            });
+        }
+    }
+}
+
+/// The first popular crate at Damerau-Levenshtein distance exactly 1, if any.
+fn nearest_popular(name: &str) -> Option<&'static str> {
+    POPULAR_CRATES
+        .iter()
+        .copied()
+        .find(|p| *p != name && damerau_levenshtein(name, p) == 1)
+}
+
+/// Damerau-Levenshtein edit distance (insert/delete/substitute/transpose).
+/// Operates on bytes — crate names are ASCII.
+pub(crate) fn damerau_levenshtein(a: &str, b: &str) -> usize {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    let (n, m) = (a.len(), b.len());
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+    let mut prev2: Vec<usize> = vec![0; m + 1];
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr: Vec<usize> = vec![0; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            let mut val = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                val = val.min(prev2[j - 2] + 1); // transposition
+            }
+            curr[j] = val;
+        }
+        std::mem::swap(&mut prev2, &mut prev);
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
+}
+
+/// Markers of anomalous build-script *intent*, scanned statically (never run).
+///
+/// Network access and opaque embedded payloads in a `build.rs` are strong red
+/// flags — a build script should compile, not phone home or unpack a blob. We
+/// deliberately do NOT flag process execution alone, because legitimate
+/// native-build crates (`cc`, `cmake`, `pkg-config`) spawn the C toolchain.
+const BUILD_RS_NETWORK: &[&str] = &[
+    "reqwest",
+    "ureq",
+    "hyper",
+    "isahc",
+    "curl",
+    "TcpStream",
+    "std::net",
+    "minreq",
+    "attohttpc",
+    "tokio::net",
+];
+const BUILD_RS_PAYLOAD: &[&str] = &[
+    "include_bytes!",
+    "base64::decode",
+    "STANDARD.decode",
+    "from_base64",
+    "hex::decode",
+    "libloading",
+    "dlopen",
+];
+
+/// Markers that a runtime source file *harvests secrets*: crypto-wallet / key
+/// vocabulary. Individually noisy, but decisive in conjunction with scanning the
+/// user's own source files (`SOURCE_SCAN`) — the faster_log / async_println
+/// malware fingerprint (Sept 2025).
+const SECRET_MARKERS: &[&str] = &[
+    "base58",
+    "Base58",
+    "private_key",
+    "private key",
+    "PRIVATE KEY",
+    "keypair",
+    "secp256k1",
+    "mnemonic",
+    "seed phrase",
+    "solana",
+    "Solana",
+    "ethereum",
+    "Ethereum",
+    "wallet",
+];
+/// Markers that code walks/reads the *consuming project's* `.rs` source — almost
+/// never legitimate for a runtime library.
+const SOURCE_SCAN: &[&str] = &[
+    "read_dir",
+    "WalkDir",
+    "walkdir",
+    "read_to_string",
+    "fs::read",
+];
+
+#[derive(Default)]
+struct ExfilScan {
+    network: bool,
+    scans_source: bool,
+    secrets: bool,
+}
+
+/// Scan a crate's `src` tree (read-only, bounded, symlink-safe) for the runtime
+/// secret-exfiltration fingerprint.
+fn scan_source_exfil(crate_dir: &Path) -> Option<(ExfilScan, PathBuf)> {
+    use crate::safety::{MAX_DIR_DEPTH, MAX_DIR_ENTRIES, MAX_SOURCE_FILE_BYTES};
+    let mut found = ExfilScan::default();
+    let mut sample: Option<PathBuf> = None;
+    let mut stack: Vec<(PathBuf, usize)> = if crate_dir.join("src").is_dir() {
+        vec![(crate_dir.join("src"), 0)]
+    } else {
+        vec![(crate_dir.to_path_buf(), 0)]
+    };
+    let mut visited = 0usize;
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if visited >= MAX_DIR_ENTRIES {
+                break;
+            }
+            visited += 1;
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if ft.is_dir() {
+                if depth < MAX_DIR_DEPTH {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            if ft.is_file() && path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                if let Some(c) = crate::safety::read_file_capped(&path, MAX_SOURCE_FILE_BYTES) {
+                    let scans = c.contains("\".rs\"") && SOURCE_SCAN.iter().any(|m| c.contains(m));
+                    let net = BUILD_RS_NETWORK.iter().any(|m| c.contains(m));
+                    let sec = SECRET_MARKERS.iter().any(|m| c.contains(m));
+                    if scans && sample.is_none() {
+                        sample = Some(path.clone());
+                    }
+                    found.scans_source |= scans;
+                    found.network |= net;
+                    found.secrets |= sec;
+                }
+            }
+        }
+    }
+    sample.map(|s| (found, s))
+}
+
+/// Build the `suspicious_source_exfil` signal if a crate's runtime source both
+/// scans the project's `.rs` files AND either exfiltrates over the network or
+/// references secret/wallet material — the live crypto-stealer crate pattern.
+fn source_exfil_signal(package: &str, scan: &ExfilScan, path: String) -> Option<RiskSignal> {
+    if !(scan.scans_source && (scan.network || scan.secrets)) {
+        return None;
+    }
+    let mut what = Vec::new();
+    if scan.network {
+        what.push("exfiltrates over the network");
+    }
+    if scan.secrets {
+        what.push("references wallet/private-key material");
+    }
+    Some(RiskSignal {
+        id: "suspicious_source_exfil".into(),
+        package: package.to_string(),
+        severity: Severity::High,
+        weight: 26,
+        confidence: 0.6,
+        evidence: vec![
+            Evidence::with_path(
+                "source",
+                path,
+                "runtime source scans the project's `.rs` files (scanned statically, never executed)",
+            ),
+            Evidence::new(
+                "heuristic",
+                format!("…and {} — matches the faster_log/async_println crypto-stealer pattern", what.join(" and ")),
+            ),
+        ],
+        recommendation:
+            "A dependency that reads your source files and exfiltrates/handles secrets is almost \
+             certainly malicious. Do not build it; report it to the registry."
+                .into(),
+    })
+}
+
+/// Build an optional `build_script_suspicious` signal from a build.rs body.
+pub(crate) fn build_script_intent_signal(
+    package: &str,
+    content: &str,
+    path: String,
+) -> Option<RiskSignal> {
+    let net: Vec<&str> = BUILD_RS_NETWORK
+        .iter()
+        .copied()
+        .filter(|m| content.contains(*m))
+        .collect();
+    let payload: Vec<&str> = BUILD_RS_PAYLOAD
+        .iter()
+        .copied()
+        .filter(|m| content.contains(*m))
+        .collect();
+
+    if net.is_empty() && payload.is_empty() {
+        return None;
+    }
+
+    let (severity, weight) = if !net.is_empty() {
+        (Severity::High, 28)
+    } else {
+        (Severity::Medium, 16)
+    };
+
+    let mut evidence = vec![Evidence::with_path(
+        "source",
+        path,
+        "build.rs shows anomalous intent (scanned statically, never executed)",
+    )];
+    if !net.is_empty() {
+        evidence.push(Evidence::new(
+            "heuristic",
+            format!("network access in build script: {}", net.join(", ")),
+        ));
+    }
+    if !payload.is_empty() {
+        evidence.push(Evidence::new(
+            "heuristic",
+            format!("embedded payload / dynamic loading: {}", payload.join(", ")),
+        ));
+    }
+
+    Some(RiskSignal {
+        id: "build_script_suspicious".into(),
+        package: package.to_string(),
+        severity,
+        weight,
+        confidence: 0.8,
+        evidence,
+        recommendation:
+            "A build script that reaches the network or unpacks an opaque payload is a known \
+             malware vector. Manually review build.rs before building this crate."
+                .into(),
+    })
+}
+
+/// Ubiquitous, widely-audited platform/ecosystem crates. Their heuristic
+/// findings (FFI name, build script, unsafe, duplicate versions) are kept for
+/// transparency but contribute zero weight, so they never dominate the score.
+/// Advisory matches against these crates are NEVER suppressed.
+pub const KNOWN_GOOD_CRATES: &[&str] = &[
+    // Core platform / std-adjacent
+    "libc",
+    "windows-sys",
+    "windows-targets",
+    "windows_aarch64_gnullvm",
+    "windows_aarch64_msvc",
+    "windows_i686_gnu",
+    "windows_i686_gnullvm",
+    "windows_i686_msvc",
+    "windows_x86_64_gnu",
+    "windows_x86_64_gnullvm",
+    "windows_x86_64_msvc",
+    "linux-raw-sys",
+    "core-foundation-sys",
+    "errno",
+    // wasm / web
+    "js-sys",
+    "web-sys",
+    "wasm-bindgen",
+    "wasm-bindgen-backend",
+    "wasm-bindgen-shared",
+    // ubiquitous low-level utilities
+    "bitflags",
+    "cfg-if",
+    "memchr",
+    "once_cell",
+    "smallvec",
+    "rustix",
+    "getrandom",
+];
+
+/// Whether a crate is on the built-in known-good baseline (case-sensitive,
+/// matches crate names as they appear in `Cargo.lock`).
+pub fn is_known_good(name: &str) -> bool {
+    KNOWN_GOOD_CRATES.contains(&name)
+}
+
+/// Downgrade heuristic (non-advisory) findings for known-good crates to Info /
+/// zero weight, appending a note. Advisory findings are left untouched.
+fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
+    for signal in signals.iter_mut() {
+        // Advisory matches, yanked status and *suspicious* build scripts are
+        // strong evidence, never suppressed by the baseline.
+        if signal.id.starts_with("advisory_")
+            || signal.id == "yanked_crate"
+            || signal.id == "build_script_suspicious"
+            || signal.id == "suspicious_source_exfil"
+            || signal.id == "possible_typosquat"
+        {
+            continue;
+        }
+        let name = signal.package.split('@').next().unwrap_or(&signal.package);
+        if is_known_good(name) {
+            signal.severity = Severity::Info;
+            signal.weight = 0;
+            signal.evidence.push(Evidence::new(
+                "baseline",
+                "crate is on the rustinel known-good baseline (ubiquitous platform/ecosystem crate); not counted toward risk",
+            ));
+        }
+    }
+}
+
+/// Read-only source/metadata scanning for crates we can find on disk.
+fn collect_source_signals(
+    lock: &LockfileModel,
+    source_root: &Path,
+    signals: &mut Vec<RiskSignal>,
+) -> Result<(), RustinelError> {
+    for package in lock.registry_packages() {
+        let Some(crate_dir) = locate_crate_dir(source_root, package) else {
+            continue;
+        };
+
+        // build.rs detection — file presence only, never executed.
+        let build_rs = crate_dir.join("build.rs");
+        if build_rs.is_file() {
+            signals.push(RiskSignal {
+                id: "build_script_present".into(),
+                package: package.id.to_string(),
+                // Presence of a build script is ubiquitous and informational; the
+                // *intent* scan (build_script_suspicious) carries the real weight.
+                severity: Severity::Low,
+                weight: 2,
+                confidence: 0.95,
+                evidence: vec![Evidence::with_path(
+                    "file",
+                    rel_display(source_root, &build_rs),
+                    "build.rs exists; the file was inspected statically and never executed",
+                )],
+                recommendation: "Review the build script before merging.".into(),
+            });
+
+            // Static *intent* scan of the build script. A build.rs that reaches
+            // the network or embeds an opaque payload is highly anomalous and is
+            // the exact vector used by recent malicious crates — never executed,
+            // only read.
+            if let Some(content) =
+                crate::safety::read_file_capped(&build_rs, crate::safety::MAX_SOURCE_FILE_BYTES)
+            {
+                if let Some(sig) = build_script_intent_signal(
+                    &package.id.to_string(),
+                    &content,
+                    rel_display(source_root, &build_rs),
+                ) {
+                    signals.push(sig);
+                }
+            }
+        }
+
+        // Manifest signals: native `links`, declared license.
+        let manifest = crate_dir.join("Cargo.toml");
+        if let Some(meta) = read_manifest(&manifest) {
+            if let Some(links) = meta.links {
+                // Manifest-confirmed native linkage is a stronger signal than the
+                // name heuristic: escalate severity/weight and confidence.
+                if let Some(existing) = signals
+                    .iter_mut()
+                    .find(|s| s.id == "native_ffi_detected" && s.package == package.id.to_string())
+                {
+                    existing.severity = Severity::Medium;
+                    existing.weight = 14;
+                    existing.confidence = 0.95;
+                    existing.evidence.push(Evidence::with_path(
+                        "manifest",
+                        rel_display(source_root, &manifest),
+                        format!("manifest declares `links = \"{links}\"`"),
+                    ));
+                } else {
+                    signals.push(RiskSignal {
+                        id: "native_ffi_detected".into(),
+                        package: package.id.to_string(),
+                        severity: Severity::Medium,
+                        weight: 14,
+                        confidence: 0.9,
+                        evidence: vec![Evidence::with_path(
+                            "manifest",
+                            rel_display(source_root, &manifest),
+                            format!("manifest declares `links = \"{links}\"`"),
+                        )],
+                        recommendation:
+                            "Review the native dependency and its build process before merging."
+                                .into(),
+                    });
+                }
+            }
+
+            signals.push(license_signal(
+                package,
+                meta.license.as_deref(),
+                &manifest,
+                source_root,
+            ));
+        }
+
+        // unsafe usage — static, comment/string-aware count across src/*.rs.
+        // `unsafe` is ubiquitous and is NOT a vulnerability by itself, so it
+        // carries little score weight (cargo-geiger philosophy); it stays visible.
+        if let Some((stats, sample)) = count_unsafe(&crate_dir) {
+            if stats.total > 0 {
+                let (severity, weight) = if stats.total >= 20 {
+                    (Severity::Low, 3)
+                } else {
+                    (Severity::Low, 1)
+                };
+                signals.push(RiskSignal {
+                    id: "unsafe_present".into(),
+                    package: package.id.to_string(),
+                    severity,
+                    weight,
+                    confidence: 0.8,
+                    evidence: vec![Evidence::with_path(
+                        "source",
+                        rel_display(source_root, &sample),
+                        format!(
+                            "{} `unsafe` usage(s) found by static scan (comments and strings ignored). \
+                             Use of `unsafe` is not automatically a vulnerability; it indicates code that warrants review.",
+                            stats.breakdown()
+                        ),
+                    )],
+                    recommendation:
+                        "Confirm that `unsafe` blocks are justified and reviewed. This is informational, not a vulnerability."
+                            .into(),
+                });
+            }
+        }
+
+        // Runtime secret-exfiltration fingerprint (faster_log/async_println class).
+        if let Some((scan, sample)) = scan_source_exfil(&crate_dir) {
+            if let Some(sig) = source_exfil_signal(
+                &package.id.to_string(),
+                &scan,
+                rel_display(source_root, &sample),
+            ) {
+                signals.push(sig);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn license_signal(
+    package: &Package,
+    license: Option<&str>,
+    manifest: &Path,
+    source_root: &Path,
+) -> RiskSignal {
+    match license {
+        Some(license) => RiskSignal {
+            id: "license_detected".into(),
+            package: package.id.to_string(),
+            severity: Severity::Info,
+            weight: 0,
+            confidence: 1.0,
+            evidence: vec![Evidence::with_path(
+                "manifest",
+                rel_display(source_root, manifest),
+                format!("declared license: {license}"),
+            )],
+            recommendation: "Confirm the license is allowed by your organization policy.".into(),
+        },
+        None => RiskSignal {
+            id: "license_unknown".into(),
+            package: package.id.to_string(),
+            severity: Severity::Low,
+            weight: 4,
+            confidence: 0.9,
+            evidence: vec![Evidence::with_path(
+                "manifest",
+                rel_display(source_root, manifest),
+                "no `license` or `license-file` field found in the manifest",
+            )],
+            recommendation: "Determine the crate's license before depending on it.".into(),
+        },
+    }
+}
+
+/// Minimal manifest fields we care about. Parsed read-only.
+struct ManifestMeta {
+    links: Option<String>,
+    license: Option<String>,
+}
+
+fn read_manifest(path: &Path) -> Option<ManifestMeta> {
+    let content = crate::safety::read_file_capped(path, crate::safety::MAX_SOURCE_FILE_BYTES)?;
+    let value: toml::Value = toml::from_str(&content).ok()?;
+    let package = value.get("package")?;
+    let links = package
+        .get("links")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let license = package
+        .get("license")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            package
+                .get("license-file")
+                .and_then(|v| v.as_str())
+                .map(|f| format!("file:{f}"))
+        });
+    Some(ManifestMeta { links, license })
+}
+
+/// Count `unsafe` tokens across the crate's `src` tree. Returns the count plus a
+/// representative file for evidence.
+///
+/// Hardened traversal: symlinks are never followed (so an attacker-planted
+/// symlink cannot redirect the scan to `/etc/shadow`), recursion depth and
+/// total entries are bounded, and each file read is size-capped.
+fn count_unsafe(crate_dir: &Path) -> Option<(UnsafeStats, PathBuf)> {
+    use crate::safety::{MAX_DIR_DEPTH, MAX_DIR_ENTRIES, MAX_SOURCE_FILE_BYTES};
+
+    let mut total = UnsafeStats::default();
+    let mut sample: Option<PathBuf> = None;
+    // (dir, depth)
+    let mut stack: Vec<(PathBuf, usize)> = if crate_dir.join("src").is_dir() {
+        vec![(crate_dir.join("src"), 0)]
+    } else {
+        vec![(crate_dir.to_path_buf(), 0)]
+    };
+
+    let mut visited = 0usize;
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if visited >= MAX_DIR_ENTRIES {
+                return sample.map(|s| (total, s));
+            }
+            visited += 1;
+            // file_type() from a DirEntry does NOT follow symlinks.
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_symlink() {
+                continue; // never traverse or read through symlinks
+            }
+            let path = entry.path();
+            if ft.is_dir() {
+                if depth < MAX_DIR_DEPTH {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            if ft.is_file() && path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                if let Some(content) = crate::safety::read_file_capped(&path, MAX_SOURCE_FILE_BYTES)
+                {
+                    let stats = scan_unsafe(&content);
+                    if stats.total > 0 {
+                        if sample.is_none() {
+                            sample = Some(path.clone());
+                        }
+                        total.add(&stats);
+                    }
+                }
+            }
+        }
+    }
+    sample.map(|s| (total, s))
+}
+
+/// Breakdown of `unsafe` usage, so the finding can *contextualize* rather than
+/// just count (a gap noted vs cargo-geiger).
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct UnsafeStats {
+    total: usize,
+    fns: usize,
+    impls: usize,
+    traits: usize,
+    blocks: usize,
+}
+
+impl UnsafeStats {
+    fn add(&mut self, o: &UnsafeStats) {
+        self.total += o.total;
+        self.fns += o.fns;
+        self.impls += o.impls;
+        self.traits += o.traits;
+        self.blocks += o.blocks;
+    }
+
+    /// "12 (3 fn, 1 impl, 8 block)" style breakdown.
+    fn breakdown(&self) -> String {
+        let mut parts = Vec::new();
+        if self.fns > 0 {
+            parts.push(format!("{} fn", self.fns));
+        }
+        if self.impls > 0 {
+            parts.push(format!("{} impl", self.impls));
+        }
+        if self.traits > 0 {
+            parts.push(format!("{} trait", self.traits));
+        }
+        if self.blocks > 0 {
+            parts.push(format!("{} block", self.blocks));
+        }
+        if parts.is_empty() {
+            self.total.to_string()
+        } else {
+            format!("{} ({})", self.total, parts.join(", "))
+        }
+    }
+}
+
+/// Count `unsafe` keywords in real code, ignoring comments and string/raw-string
+/// literals (so `unsafe` in a doc comment or string is not counted), and
+/// categorize each by the construct that follows (`fn`/`impl`/`trait`/block).
+///
+/// A small hand lexer — deliberately not a full parser, never executes anything,
+/// and is bounded by the caller's file-size cap. Unrecognized exotic syntax can
+/// only mis-count slightly; it can never panic.
+pub(crate) fn scan_unsafe(src: &str) -> UnsafeStats {
+    let b = src.as_bytes();
+    let n = b.len();
+    let mut stats = UnsafeStats::default();
+    let mut i = 0;
+
+    enum State {
+        Normal,
+        Line,
+        Block(usize),
+        Str,
+        Raw(usize),
+    }
+    let mut st = State::Normal;
+
+    while i < n {
+        match st {
+            State::Normal => {
+                if b[i] == b'/' && i + 1 < n && b[i + 1] == b'/' {
+                    st = State::Line;
+                    i += 2;
+                } else if b[i] == b'/' && i + 1 < n && b[i + 1] == b'*' {
+                    st = State::Block(1);
+                    i += 2;
+                } else if let Some((hashes, skip)) = raw_string_start(b, i) {
+                    st = State::Raw(hashes);
+                    i += skip;
+                } else if b[i] == b'"' {
+                    st = State::Str;
+                    i += 1;
+                } else if b[i] == b'\'' {
+                    i += char_literal_len(b, i); // skip char literals (>=1)
+                } else if b[i] == b'u' && matches_unsafe(b, i) {
+                    stats.total += 1;
+                    categorize(b, i + 6, &mut stats);
+                    i += 6;
+                } else {
+                    i += 1;
+                }
+            }
+            State::Line => {
+                if b[i] == b'\n' {
+                    st = State::Normal;
+                }
+                i += 1;
+            }
+            State::Block(d) => {
+                if b[i] == b'/' && i + 1 < n && b[i + 1] == b'*' {
+                    st = State::Block(d + 1);
+                    i += 2;
+                } else if b[i] == b'*' && i + 1 < n && b[i + 1] == b'/' {
+                    st = if d == 1 {
+                        State::Normal
+                    } else {
+                        State::Block(d - 1)
+                    };
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            State::Str => {
+                if b[i] == b'\\' {
+                    i += 2;
+                } else {
+                    if b[i] == b'"' {
+                        st = State::Normal;
+                    }
+                    i += 1;
+                }
+            }
+            State::Raw(h) => {
+                if b[i] == b'"' && i + 1 + h <= n && b[i + 1..i + 1 + h].iter().all(|&c| c == b'#')
+                {
+                    st = State::Normal;
+                    i += 1 + h;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+    stats
+}
+
+/// `unsafe` as a whole word at position `i`.
+fn matches_unsafe(b: &[u8], i: usize) -> bool {
+    if i + 6 > b.len() || &b[i..i + 6] != b"unsafe" {
+        return false;
+    }
+    let before_ok = i == 0 || !is_ident_byte(b[i - 1]);
+    let after_ok = i + 6 >= b.len() || !is_ident_byte(b[i + 6]);
+    before_ok && after_ok
+}
+
+/// Classify the construct after an `unsafe` keyword (whitespace-skipped).
+fn categorize(b: &[u8], mut j: usize, stats: &mut UnsafeStats) {
+    while j < b.len() && b[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    let starts = |kw: &[u8]| -> bool {
+        j + kw.len() <= b.len()
+            && &b[j..j + kw.len()] == kw
+            && (j + kw.len() == b.len() || !is_ident_byte(b[j + kw.len()]))
+    };
+    if starts(b"fn") {
+        stats.fns += 1;
+    } else if starts(b"impl") {
+        stats.impls += 1;
+    } else if starts(b"trait") {
+        stats.traits += 1;
+    } else {
+        stats.blocks += 1;
+    }
+}
+
+/// If a raw-string literal (`r"`, `r#"`, `br##"`, …) starts at `i`, return its
+/// hash count and the number of bytes to skip to land after the opening quote.
+fn raw_string_start(b: &[u8], i: usize) -> Option<(usize, usize)> {
+    // Must be a token start: preceded by a non-identifier byte.
+    if i > 0 && is_ident_byte(b[i - 1]) {
+        return None;
+    }
+    let mut p = i;
+    if b.get(p) == Some(&b'b') {
+        p += 1; // byte raw string
+    }
+    if b.get(p) != Some(&b'r') {
+        return None;
+    }
+    p += 1;
+    let hash_start = p;
+    while b.get(p) == Some(&b'#') {
+        p += 1;
+    }
+    if b.get(p) == Some(&b'"') {
+        let hashes = p - hash_start;
+        Some((hashes, p - i + 1)) // skip through the opening quote
+    } else {
+        None
+    }
+}
+
+/// Byte length of a char literal starting at `i` (`'a'`, `'\n'`, `'\u{1F}'`),
+/// or 1 if it's actually a lifetime (`'a`) / not a literal — so the caller
+/// always advances.
+fn char_literal_len(b: &[u8], i: usize) -> usize {
+    // b[i] == '\''
+    if b.get(i + 1) == Some(&b'\\') {
+        // escaped: find the closing quote within a bounded window
+        let mut p = i + 2;
+        let end = (i + 12).min(b.len());
+        while p < end {
+            if b[p] == b'\'' {
+                return p - i + 1;
+            }
+            p += 1;
+        }
+        1
+    } else if b.get(i + 2) == Some(&b'\'') && b.get(i + 1) != Some(&b'\'') {
+        3 // simple 'X'
+    } else {
+        1 // lifetime or unknown
+    }
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Find a crate's on-disk directory under a source root, supporting both the
+/// flat fixture layout (`<root>/<name>-<version>`) and the real Cargo registry
+/// src layout (`<root>/<registry>/<name>-<version>`).
+///
+/// Hardened against path traversal: the crate name and version come from an
+/// untrusted lockfile, so they are validated to be safe single path segments
+/// (no `/`, `\`, `..`, NUL) and the resolved directory is verified to be
+/// canonically contained within `source_root`.
+fn locate_crate_dir(source_root: &Path, package: &Package) -> Option<PathBuf> {
+    use crate::safety::{
+        is_contained_within, is_safe_crate_name, is_safe_path_segment, is_safe_version,
+    };
+
+    if !is_safe_crate_name(&package.id.name) || !is_safe_version(&package.id.version) {
+        return None;
+    }
+    let dir_name = format!("{}-{}", package.id.name, package.id.version);
+    if !is_safe_path_segment(&dir_name) {
+        return None;
+    }
+
+    let verify = |candidate: PathBuf| -> Option<PathBuf> {
+        // Must be a real directory (not a symlink) AND inside source_root.
+        let meta = std::fs::symlink_metadata(&candidate).ok()?;
+        if !meta.file_type().is_dir() {
+            return None;
+        }
+        if is_contained_within(source_root, &candidate) {
+            Some(candidate)
+        } else {
+            None
+        }
+    };
+
+    if let Some(dir) = verify(source_root.join(&dir_name)) {
+        return Some(dir);
+    }
+    // One level of nesting (e.g. registry index hash dir).
+    let entries = std::fs::read_dir(source_root).ok()?;
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if !ft.is_dir() {
+            continue; // skip symlinks and files
+        }
+        if let Some(dir) = verify(entry.path().join(&dir_name)) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+fn rel_display(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lockfile::PackageId;
+
+    fn pkg(name: &str, version: &str, local: bool) -> Package {
+        Package {
+            id: PackageId {
+                name: name.into(),
+                version: version.into(),
+                source: if local {
+                    None
+                } else {
+                    Some("registry+https://github.com/rust-lang/crates.io-index".into())
+                },
+            },
+            checksum: None,
+            dependencies: vec![],
+            lockfile_line: None,
+        }
+    }
+
+    fn lock(packages: Vec<Package>) -> LockfileModel {
+        LockfileModel {
+            path: PathBuf::from("Cargo.lock"),
+            version: Some(3),
+            packages,
+        }
+    }
+
+    #[test]
+    fn locate_crate_dir_rejects_path_traversal() {
+        // A hostile lockfile cannot make us resolve a directory outside the root.
+        let root = std::env::temp_dir();
+        for evil in ["../../etc", "..", "foo/bar", "a/../../b"] {
+            let p = pkg(evil, "1.0.0", false);
+            assert!(
+                locate_crate_dir(&root, &p).is_none(),
+                "traversal name {evil:?} must be refused"
+            );
+        }
+        // A hostile version string is likewise refused.
+        let p = pkg("serde", "../../etc", false);
+        assert!(locate_crate_dir(&root, &p).is_none());
+    }
+
+    #[test]
+    fn detects_native_ffi_by_name() {
+        let model = lock(vec![pkg("openssl-sys", "0.9.99", false)]);
+        let mut signals = vec![];
+        collect_name_heuristics(&model, &mut signals);
+        assert!(signals.iter().any(|s| s.id == "native_ffi_detected"));
+        let s = signals
+            .iter()
+            .find(|s| s.id == "native_ffi_detected")
+            .unwrap();
+        // Name-only FFI is a weak signal: Low severity, modest confidence.
+        assert_eq!(s.severity, Severity::Low);
+        assert!(s.confidence >= 0.5);
+    }
+
+    #[test]
+    fn known_good_crate_downgraded_to_baseline() {
+        let model = lock(vec![pkg("windows-sys", "0.61.2", false)]);
+        let signals = collect_basic_signals(&model, &AnalysisOptions::default()).unwrap();
+        let ffi = signals
+            .iter()
+            .find(|s| s.id == "native_ffi_detected")
+            .expect("signal kept for transparency");
+        assert_eq!(ffi.severity, Severity::Info);
+        assert_eq!(ffi.weight, 0);
+        assert!(ffi.evidence.iter().any(|e| e.kind == "baseline"));
+        assert!(is_known_good("windows-sys"));
+        assert!(!is_known_good("openssl-sys"));
+    }
+
+    #[test]
+    fn local_crate_not_flagged_for_ffi() {
+        let model = lock(vec![pkg("my-app-sys", "0.1.0", true)]);
+        let mut signals = vec![];
+        collect_name_heuristics(&model, &mut signals);
+        assert!(signals.is_empty());
+    }
+
+    #[test]
+    fn damerau_levenshtein_basics() {
+        assert_eq!(damerau_levenshtein("serde", "serde"), 0);
+        assert_eq!(damerau_levenshtein("serde", "serdf"), 1); // substitution
+        assert_eq!(damerau_levenshtein("tokio", "tokoi"), 1); // transposition
+        assert_eq!(damerau_levenshtein("reqwest", "reqwes"), 1); // deletion
+        assert_eq!(damerau_levenshtein("serde", "serde_json"), 5);
+    }
+
+    #[test]
+    fn detects_typosquat_one_edit_away() {
+        let model = lock(vec![pkg("reqwset", "1.0.0", false)]); // transposition of reqwest
+        let mut signals = vec![];
+        collect_typosquat(&model, &mut signals);
+        let s = signals
+            .iter()
+            .find(|s| s.id == "possible_typosquat")
+            .unwrap();
+        assert!(s.evidence[0].summary.contains("reqwest"));
+    }
+
+    #[test]
+    fn does_not_flag_legitimate_crates() {
+        // Real crates that merely resemble popular ones are far in edit distance.
+        let model = lock(vec![
+            pkg("serde_json", "1.0.0", false),
+            pkg("tokio-util", "0.7.0", false),
+            pkg("my-app-utils", "0.1.0", false),
+            pkg("serde", "1.0.0", false), // exact popular -> not flagged
+        ]);
+        let mut signals = vec![];
+        collect_typosquat(&model, &mut signals);
+        assert!(signals.is_empty(), "false positives: {signals:?}");
+    }
+
+    #[test]
+    fn legit_lookalikes_are_not_typosquats() {
+        // Real, widely-used crates that sit one edit away from a popular crate
+        // (`mime`↔`time`, `md-5`↔`md5`, `anes`↔`aes`). Regression for a corpus
+        // scan that mis-flagged all three as typosquats.
+        let model = lock(vec![
+            pkg("mime", "0.3.17", false),
+            pkg("md-5", "0.10.6", false),
+            pkg("anes", "0.1.6", false),
+        ]);
+        let mut signals = vec![];
+        collect_typosquat(&model, &mut signals);
+        assert!(signals.is_empty(), "false positives: {signals:?}");
+    }
+
+    #[test]
+    fn source_exfil_requires_conjunction() {
+        // scans source alone -> not enough (could be a legit codegen tool).
+        let only_scan = ExfilScan {
+            scans_source: true,
+            network: false,
+            secrets: false,
+        };
+        assert!(source_exfil_signal("x@1", &only_scan, "lib.rs".into()).is_none());
+        // network alone -> not enough (reqwest is a normal dependency).
+        let only_net = ExfilScan {
+            scans_source: false,
+            network: true,
+            secrets: false,
+        };
+        assert!(source_exfil_signal("x@1", &only_net, "lib.rs".into()).is_none());
+        // scans source + secrets -> the malware fingerprint.
+        let bad = ExfilScan {
+            scans_source: true,
+            network: false,
+            secrets: true,
+        };
+        let sig = source_exfil_signal("x@1", &bad, "lib.rs".into()).unwrap();
+        assert_eq!(sig.id, "suspicious_source_exfil");
+        assert_eq!(sig.severity, Severity::High);
+    }
+
+    #[test]
+    fn benign_build_script_is_not_suspicious() {
+        // The legit cc-style fixture: only emits link directives.
+        let src = "fn main() {\n    println!(\"cargo:rustc-link-lib=ssl\");\n}\n";
+        assert!(build_script_intent_signal("openssl-sys@0.9.99", src, "build.rs".into()).is_none());
+    }
+
+    #[test]
+    fn network_build_script_is_high() {
+        let src = "fn main(){ let _ = reqwest::blocking::get(\"http://evil/x\"); }";
+        let sig = build_script_intent_signal("evil@1.0.0", src, "build.rs".into()).unwrap();
+        assert_eq!(sig.id, "build_script_suspicious");
+        assert_eq!(sig.severity, Severity::High);
+        assert!(sig
+            .evidence
+            .iter()
+            .any(|e| e.summary.contains("network access")));
+    }
+
+    #[test]
+    fn payload_build_script_is_medium() {
+        let src = "fn main(){ let p = include_bytes!(\"blob.bin\"); let _ = p; }";
+        let sig = build_script_intent_signal("sneaky@1.0.0", src, "build.rs".into()).unwrap();
+        assert_eq!(sig.severity, Severity::Medium);
+        assert!(sig.evidence.iter().any(|e| e.summary.contains("payload")));
+    }
+
+    #[test]
+    fn detects_multiple_versions() {
+        let model = lock(vec![pkg("foo", "1.0.0", false), pkg("foo", "2.0.0", false)]);
+        let mut signals = vec![];
+        collect_multiple_versions(&model, &mut signals);
+        assert_eq!(
+            signals
+                .iter()
+                .filter(|s| s.id == "multiple_versions_same_crate")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn unsafe_scan_counts_only_real_code() {
+        assert_eq!(scan_unsafe("unsafe { *p }").total, 1);
+        assert_eq!(scan_unsafe("no danger here").total, 0);
+        // `unsafely` is not the keyword; `// unsafe` is a comment -> 0.
+        assert_eq!(scan_unsafe("let unsafely = 1; // unsafe").total, 0);
+    }
+
+    #[test]
+    fn unsafe_scan_ignores_comments_and_strings() {
+        let src = r##"
+            // unsafe in a line comment
+            /* unsafe in a block /* nested unsafe */ comment */
+            let s = "this unsafe is a string";
+            let r = r#"raw unsafe"#;
+            fn real() { unsafe { } }
+        "##;
+        let st = scan_unsafe(src);
+        assert_eq!(st.total, 1, "only the real unsafe block counts, got {st:?}");
+        assert_eq!(st.blocks, 1);
+    }
+
+    #[test]
+    fn unsafe_scan_categorizes() {
+        let src = "unsafe fn a(){} unsafe impl T for U {} unsafe trait W {} fn b(){ unsafe { } }";
+        let st = scan_unsafe(src);
+        assert_eq!(st.total, 4);
+        assert_eq!(st.fns, 1);
+        assert_eq!(st.impls, 1);
+        assert_eq!(st.traits, 1);
+        assert_eq!(st.blocks, 1);
+        assert_eq!(st.breakdown(), "4 (1 fn, 1 impl, 1 trait, 1 block)");
+    }
+
+    #[test]
+    fn unsafe_scan_handles_char_literal_with_quote() {
+        // The '"' char literal must not flip the scanner into string mode.
+        let src = "let q = '\"'; unsafe { }";
+        assert_eq!(scan_unsafe(src).total, 1);
+    }
+
+    #[test]
+    fn sort_is_severity_descending() {
+        let mut signals = vec![
+            RiskSignal {
+                id: "a".into(),
+                package: "p".into(),
+                severity: Severity::Low,
+                weight: 1,
+                confidence: 1.0,
+                evidence: vec![],
+                recommendation: String::new(),
+            },
+            RiskSignal {
+                id: "b".into(),
+                package: "p".into(),
+                severity: Severity::High,
+                weight: 1,
+                confidence: 1.0,
+                evidence: vec![],
+                recommendation: String::new(),
+            },
+        ];
+        sort_signals(&mut signals);
+        assert_eq!(signals[0].severity, Severity::High);
+    }
+}

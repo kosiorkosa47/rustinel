@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/rustinel/policy.schema.json",
+  "title": "rustinel policy",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer"
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "enum": [
+            "strict",
+            "balanced",
+            "permissive",
+            "custom"
+          ]
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "max_project_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "max_package_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "fail_on_delta_above": {
+          "type": "integer"
+        },
+        "warn_on_delta_above": {
+          "type": "integer"
+        }
+      }
+    },
+    "advisories": {
+      "type": "object"
+    },
+    "signals": {
+      "type": "object"
+    },
+    "licenses": {
+      "type": "object"
+    },
+    "allow": {
+      "type": "object"
+    },
+    "deny": {
+      "type": "object"
+    }
+  }
+}

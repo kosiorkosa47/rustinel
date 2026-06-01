@@ -1,0 +1,42 @@
+name: rustinel
+
+on:
+  pull_request:
+
+# The action posts a sticky comment, so it needs write access to PRs.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-risk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need the base branch to diff Cargo.lock
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Extract the base branch's Cargo.lock so rustinel can diff PR vs base.
+      # Falls back to the current lockfile (no-op diff) if base has none.
+      - name: Extract base Cargo.lock
+        run: |
+          git show "origin/${{ github.base_ref }}:Cargo.lock" > base.Cargo.lock \
+            || cp Cargo.lock base.Cargo.lock
+
+      - uses: kosiorkosa47/rustinel@v0
+        with:
+          command: diff
+          base-lockfile: base.Cargo.lock
+          head-lockfile: Cargo.lock
+          policy: rustinel.toml
+          online-metadata: "true" # detect yanked versions via crates.io
+          # comment: "true"        # (default) post/update a sticky PR comment
+          # fail-on-review-required: "true"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustinel-report
+          path: rustinel-report.md

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "rustinel",
+          "informationUri": "https://github.com/kosiorkosa47/rustinel",
+          "rules": [
+            {
+              "id": "native_ffi_detected",
+              "name": "Native FFI dependency detected",
+              "shortDescription": {
+                "text": "Dependency uses native/FFI integration"
+              },
+              "help": {
+                "text": "Review native dependencies and build scripts before merging."
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "native_ffi_detected",
+          "level": "error",
+          "message": {
+            "text": "openssl-sys@0.9.99 introduces native FFI dependency risk."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 42
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

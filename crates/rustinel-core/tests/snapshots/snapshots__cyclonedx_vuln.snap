@@ -1,0 +1,64 @@
+---
+source: crates/rustinel-core/tests/snapshots.rs
+expression: out
+---
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:cargo/vuln-crate@1.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "name": "vuln-crate",
+      "purl": "pkg:cargo/vuln-crate@1.0.1",
+      "type": "library",
+      "version": "1.0.1"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "pkg:cargo/vuln-app@0.1.0",
+      "name": "vuln-app",
+      "type": "application",
+      "version": "0.1.0"
+    },
+    "lifecycles": [
+      {
+        "phase": "build"
+      }
+    ],
+    "tools": [
+      {
+        "name": "rustinel",
+        "vendor": "rustinel",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "specVersion": "1.5",
+  "version": 1,
+  "vulnerabilities": [
+    {
+      "affects": [
+        {
+          "ref": "pkg:cargo/vuln-crate@1.0.1"
+        }
+      ],
+      "description": "RUSTSEC-2099-0001: Synthetic test advisory for rustinel",
+      "id": "RUSTSEC-2099-0001",
+      "ratings": [
+        {
+          "severity": "high"
+        }
+      ],
+      "recommendation": "Update to a patched version: >= 1.0.2",
+      "source": {
+        "name": "RustSec"
+      }
+    }
+  ]
+}

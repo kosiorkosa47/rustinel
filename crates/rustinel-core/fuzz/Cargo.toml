@@ -1,0 +1,69 @@
+# Nightly-only deep fuzzing harness (libFuzzer via cargo-fuzz).
+# Run from `crates/rustinel-core`:
+#     cargo install cargo-fuzz
+#     cargo +nightly fuzz run lockfile
+# or use the turnkey script: `scripts/fuzz-aws.sh` (see docs/FUZZING.md).
+#
+# Its own workspace so the main `cargo build/test --workspace` never touches it.
+[package]
+name = "rustinel-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rustinel-core]
+path = ".."
+features = ["fuzz"]
+
+[[bin]]
+name = "lockfile"
+path = "fuzz_targets/lockfile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy"
+path = "fuzz_targets/policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "unsafe_scan"
+path = "fuzz_targets/unsafe_scan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "build_intent"
+path = "fuzz_targets/build_intent.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "advisory"
+path = "fuzz_targets/advisory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spdx"
+path = "fuzz_targets/spdx.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

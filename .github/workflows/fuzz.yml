@@ -1,0 +1,53 @@
+name: nightly-fuzz
+
+# Continuous, free fuzzing on GitHub-hosted runners: each target gets a short
+# coverage-guided run every night. Crashes are uploaded as artifacts. For deep
+# multi-hour runs use a big AWS box with scripts/fuzz-aws.sh (see docs/FUZZING.md).
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [lockfile, policy, unsafe_scan, build_intent, advisory, spdx]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Seed corpus
+        run: |
+          cd crates/rustinel-core
+          mkdir -p fuzz/corpus/${{ matrix.target }}
+          case "${{ matrix.target }}" in
+            lockfile) cp ../../Cargo.lock ../../fixtures/**/Cargo.lock fuzz/corpus/lockfile/ 2>/dev/null || true ;;
+            policy)   cp ../../examples/policies/*.toml fuzz/corpus/policy/ 2>/dev/null || true ;;
+            advisory) cp ../../fixtures/advisory_db/*.toml fuzz/corpus/advisory/ 2>/dev/null || true ;;
+          esac
+          true
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          cd crates/rustinel-core
+          SECS="${{ github.event.inputs.seconds || '300' }}"
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
+            -max_total_time="$SECS" -rss_limit_mb=4096 -timeout=25
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: crates/rustinel-core/fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore

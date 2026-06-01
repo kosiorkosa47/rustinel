@@ -1,0 +1,31 @@
+/target
+**/*.rs.bk
+*.pending-snap
+.DS_Store
+# cargo-fuzz artifacts
+crates/rustinel-core/fuzz/target
+crates/rustinel-core/fuzz/corpus
+crates/rustinel-core/fuzz/artifacts
+crates/rustinel-core/fuzz/Cargo.lock
+
+# Internal working artifacts — never published
+/.context-memory/
+/AGENT_BRIEF.md
+/AGENT_TASKS.yaml
+/prompts/
+/metadata.json
+
+# Internal planning/strategy docs — not part of the public crate
+/findings-log.md
+/docs/VISIBILITY-180.md
+/PRD.md
+/IMPLEMENTATION_PLAN.md
+/RELEASE_PLAN.md
+/BACKLOG.md
+/ROADMAP.md
+/ACCEPTANCE_TESTS.md
+/RISK_MODEL.md
+/THREAT_MODEL.md
+/SECURITY_MODEL.md
+/TECHNICAL_SPEC.md
+/CHECKSUMS.sha256
