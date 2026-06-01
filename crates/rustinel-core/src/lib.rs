@@ -33,6 +33,27 @@ pub use report::{OutputFormat, SentinelReport};
 
 use std::path::{Path, PathBuf};
 
+/// Registry metadata for one crate, gathered by the caller (CLI) from the
+/// crates.io API and injected so the core stays network- and clock-free.
+///
+/// This is what lets rustinel reason about *trust and freshness* — signals a
+/// purely advisory-database-driven tool (cargo-audit) cannot produce, because
+/// they exist before any advisory is ever filed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CrateMetadata {
+    /// Age in days of the *locked* version at analysis time (caller computes it
+    /// from the version's `created_at` against the wall clock). `None` when the
+    /// metadata could not be fetched.
+    pub published_days_ago: Option<u64>,
+    /// All-time download count for the crate. Low counts mark obscure, unvetted
+    /// dependencies; high counts vouch for an established crate.
+    pub total_downloads: Option<u64>,
+    /// Recent (90-day) download count.
+    pub recent_downloads: Option<u64>,
+    /// crates.io owner logins (users and teams) for the crate.
+    pub owners: Vec<String>,
+}
+
 /// Options controlling a single analysis run.
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisOptions {
@@ -52,6 +73,16 @@ pub struct AnalysisOptions {
     /// (e.g. from the crates.io sparse index) and injects it here. This keeps the
     /// analysis library trivially auditable as network- and process-free.
     pub yanked: std::collections::BTreeSet<String>,
+    /// Per-crate registry metadata keyed by `name@version`, gathered by the CLI
+    /// (crates.io API) and injected. Empty when `--online-metadata` is off. Feeds
+    /// the freshness/trust signals and corroborates the typosquat heuristic.
+    pub metadata: std::collections::BTreeMap<String, CrateMetadata>,
+    /// Previously-trusted crates.io owner logins per crate name, loaded from a
+    /// committed `rustinel-trust.toml` baseline. When a crate's *current* owners
+    /// (from [`CrateMetadata::owners`]) differ from this baseline, rustinel flags
+    /// the change — the maintainer-takeover vector behind the xz and event-stream
+    /// attacks, which a database-only scanner cannot see. Empty when no baseline.
+    pub trusted_owners: std::collections::BTreeMap<String, Vec<String>>,
     /// Timestamp to embed in the report. `None` produces deterministic output.
     pub generated_at: Option<String>,
 }

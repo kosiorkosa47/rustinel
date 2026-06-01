@@ -7,6 +7,7 @@
 
 #[cfg(feature = "online")]
 mod registry;
+mod trust;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -125,6 +126,18 @@ enum Commands {
 
     /// Show the rustinel splash animation (no Cargo.lock required).
     Demo,
+
+    /// Snapshot current crates.io owners into rustinel-trust.toml — the
+    /// ownership baseline. Commit it; later checks flag when a dependency's
+    /// owners change (the maintainer-takeover vector behind xz / event-stream).
+    Trust {
+        #[arg(long, default_value = "Cargo.lock")]
+        lockfile: PathBuf,
+
+        /// Disable network access (no snapshot is written without it).
+        #[arg(long)]
+        offline: bool,
+    },
 
     /// Export a standards-based artifact (SBOM / OSV / VEX) for a lockfile.
     Export {
@@ -267,6 +280,130 @@ fn gather_yanked(online_metadata: bool, offline: bool, lockfiles: &[&Path]) -> B
         );
         BTreeSet::new()
     }
+}
+
+/// Gather crates.io metadata (downloads + publish dates) for typosquat
+/// candidates, only when `--online-metadata` is set and not offline. Powers the
+/// freshness signal and the corroborated typosquat heuristic. Empty otherwise.
+fn gather_metadata(
+    online_metadata: bool,
+    offline: bool,
+    lockfiles: &[&Path],
+) -> std::collections::BTreeMap<String, rustinel_core::CrateMetadata> {
+    if !online_metadata || offline {
+        return std::collections::BTreeMap::new();
+    }
+    #[cfg(feature = "online")]
+    {
+        let mut metadata = std::collections::BTreeMap::new();
+        eprintln!("rustinel: querying crates.io for typosquat-candidate metadata...");
+        for lf in lockfiles {
+            if let Ok(lock) = rustinel_core::lockfile::parse_lockfile(lf) {
+                metadata.extend(registry::fetch_metadata(&lock));
+            }
+        }
+        metadata
+    }
+    #[cfg(not(feature = "online"))]
+    {
+        let _ = lockfiles;
+        std::collections::BTreeMap::new()
+    }
+}
+
+/// Diff-mode metadata: fetch crates.io data for the crates the PR **adds**, so
+/// freshness/trust signals fire on what the change introduces. Empty unless
+/// `--online-metadata` is set and not offline.
+fn gather_metadata_for_diff(
+    online_metadata: bool,
+    offline: bool,
+    base: &Path,
+    head: &Path,
+) -> std::collections::BTreeMap<String, rustinel_core::CrateMetadata> {
+    if !online_metadata || offline {
+        return std::collections::BTreeMap::new();
+    }
+    #[cfg(feature = "online")]
+    {
+        eprintln!("rustinel: querying crates.io for added-crate metadata...");
+        match (
+            rustinel_core::lockfile::parse_lockfile(base),
+            rustinel_core::lockfile::parse_lockfile(head),
+        ) {
+            (Ok(b), Ok(h)) => registry::fetch_diff_metadata(&b, &h),
+            _ => std::collections::BTreeMap::new(),
+        }
+    }
+    #[cfg(not(feature = "online"))]
+    {
+        let _ = (base, head);
+        std::collections::BTreeMap::new()
+    }
+}
+
+/// Load the ownership trust baseline and, when online, fetch the *current* owners
+/// for baselined crates in this lockfile (merging them into `metadata`). Returns
+/// the baseline so the core can flag ownership changes.
+fn gather_ownership(
+    online_metadata: bool,
+    offline: bool,
+    lockfile: &Path,
+    metadata: &mut std::collections::BTreeMap<String, rustinel_core::CrateMetadata>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let trusted = trust::load(Path::new(trust::TRUST_FILE));
+    if trusted.is_empty() || !online_metadata || offline {
+        return trusted;
+    }
+    #[cfg(feature = "online")]
+    if let Ok(lock) = rustinel_core::lockfile::parse_lockfile(lockfile) {
+        let names: Vec<String> = lock
+            .registry_packages()
+            .filter(|p| trusted.contains_key(&p.id.name))
+            .map(|p| p.id.name.clone())
+            .collect::<BTreeSet<String>>()
+            .into_iter()
+            .collect();
+        if !names.is_empty() {
+            eprintln!("rustinel: checking crates.io ownership against the trust baseline...");
+            let owners = registry::fetch_owners(&names);
+            for pkg in lock.registry_packages() {
+                if let Some(o) = owners.get(&pkg.id.name) {
+                    metadata.entry(pkg.id.to_string()).or_default().owners = o.clone();
+                }
+            }
+        }
+    }
+    #[cfg(not(feature = "online"))]
+    let _ = (lockfile, metadata);
+    trusted
+}
+
+/// Snapshot current crates.io owners for every crates.io dependency in the
+/// lockfile, for writing a fresh ownership baseline.
+#[cfg(feature = "online")]
+fn snapshot_owners(
+    lockfile: &Path,
+) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
+    let lock = rustinel_core::lockfile::parse_lockfile(lockfile)?;
+    let names: Vec<String> = lock
+        .registry_packages()
+        .filter(|p| p.id.is_crates_io())
+        .map(|p| p.id.name.clone())
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
+    eprintln!(
+        "rustinel: snapshotting crates.io owners for {} crates...",
+        names.len()
+    );
+    Ok(registry::fetch_owners(&names))
+}
+
+#[cfg(not(feature = "online"))]
+fn snapshot_owners(
+    _lockfile: &Path,
+) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
+    anyhow::bail!("this binary was built without the `online` feature; `trust` is unavailable")
 }
 
 fn timestamp(no_timestamp: bool) -> Option<String> {
@@ -602,12 +739,17 @@ fn main() -> anyhow::Result<()> {
             // Auto-discover rustinel.toml when no policy was passed explicitly.
             let policy_path = policy.or_else(discover_policy);
             let yanked = gather_yanked(online_metadata, offline, &[&lockfile]);
+            let mut metadata = gather_metadata(online_metadata, offline, &[&lockfile]);
+            let trusted_owners =
+                gather_ownership(online_metadata, offline, &lockfile, &mut metadata);
             let options = AnalysisOptions {
                 offline,
                 policy: load_policy(&policy_path)?,
                 source_path: resolve_source_path(source_path),
                 advisory_db_path: advisory_db,
                 yanked,
+                metadata,
+                trusted_owners,
                 generated_at: timestamp(no_timestamp),
             };
             let report = rustinel_core::analyze_lockfile(&lockfile, options)
@@ -644,12 +786,16 @@ fn main() -> anyhow::Result<()> {
         } => {
             let policy_path = policy.or_else(discover_policy);
             let yanked = gather_yanked(online_metadata, offline, &[&base_lockfile, &head_lockfile]);
+            let metadata =
+                gather_metadata_for_diff(online_metadata, offline, &base_lockfile, &head_lockfile);
             let options = AnalysisOptions {
                 offline,
                 policy: load_policy(&policy_path)?,
                 source_path: resolve_source_path(source_path),
                 advisory_db_path: advisory_db,
                 yanked,
+                metadata,
+                trusted_owners: Default::default(),
                 generated_at: timestamp(no_timestamp),
             };
             let report = rustinel_core::analyze_diff(&base_lockfile, &head_lockfile, options)
@@ -686,6 +832,24 @@ fn main() -> anyhow::Result<()> {
             );
         }
 
+        Commands::Trust { lockfile, offline } => {
+            let lockfile = resolve_lockfile(lockfile)?;
+            if offline {
+                anyhow::bail!(
+                    "`trust` reads current owners from crates.io; remove --offline to snapshot"
+                );
+            }
+            let owners = snapshot_owners(&lockfile)?;
+            let path = std::path::PathBuf::from(trust::TRUST_FILE);
+            trust::write(&path, owners.clone())
+                .with_context(|| format!("writing {}", path.display()))?;
+            eprintln!(
+                "rustinel: wrote ownership baseline for {} crates to {} — commit it.",
+                owners.len(),
+                path.display()
+            );
+        }
+
         Commands::Advisory { command } => match command {
             AdvisoryCommands::Update { dir, url } => advisory_update(dir, &url)?,
             AdvisoryCommands::Status { dir } => advisory_status(dir)?,
@@ -705,12 +869,15 @@ fn main() -> anyhow::Result<()> {
             let lockfile = resolve_lockfile(lockfile)?;
             let policy_path = policy.or_else(discover_policy);
             let yanked = gather_yanked(online_metadata, offline, &[&lockfile]);
+            let metadata = gather_metadata(online_metadata, offline, &[&lockfile]);
             let options = AnalysisOptions {
                 offline,
                 policy: load_policy(&policy_path)?,
                 source_path: resolve_source_path(source_path),
                 advisory_db_path: advisory_db,
                 yanked,
+                metadata,
+                trusted_owners: Default::default(),
                 generated_at: timestamp(no_timestamp),
             };
             // Parse once for the component list, analyze for the vulnerability set.

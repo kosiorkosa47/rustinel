@@ -75,7 +75,9 @@ pub fn collect_basic_signals(
 
     collect_multiple_versions(lock, &mut signals);
     collect_name_heuristics(lock, &mut signals);
-    collect_typosquat(lock, &mut signals);
+    collect_typosquat(lock, options, &mut signals);
+    collect_freshness(lock, options, &mut signals);
+    collect_owners_changed(lock, options, &mut signals);
     collect_yanked(lock, options, &mut signals);
 
     if let Some(source_root) = options.source_root() {
@@ -106,6 +108,74 @@ fn annotate_dependency_paths(lock: &LockfileModel, signals: &mut [RiskSignal]) {
                 ));
             }
         }
+    }
+}
+
+/// Emit a signal when a dependency's *current* crates.io owners differ from the
+/// trusted baseline (`rustinel-trust.toml`). A newly-added maintainer is the
+/// supply-chain takeover vector behind the xz and event-stream attacks — and a
+/// database-only scanner is blind to it, because no advisory exists until long
+/// after the attack lands.
+fn collect_owners_changed(
+    lock: &LockfileModel,
+    options: &AnalysisOptions,
+    signals: &mut Vec<RiskSignal>,
+) {
+    if options.trusted_owners.is_empty() {
+        return;
+    }
+    let mut done = std::collections::BTreeSet::new();
+    for package in lock.registry_packages() {
+        let name = package.id.name.as_str();
+        // Owners are crate-level; emit at most one signal per crate name. We mark
+        // a name "done" only once we have owner metadata for it, so a version
+        // that lacks metadata never short-circuits a later version that has it.
+        if done.contains(name) {
+            continue;
+        }
+        let Some(trusted) = options.trusted_owners.get(name) else {
+            continue;
+        };
+        let Some(meta) = options.metadata.get(&package.id.to_string()) else {
+            continue;
+        };
+        if meta.owners.is_empty() {
+            continue;
+        }
+        done.insert(name.to_string());
+        let current: std::collections::BTreeSet<&str> =
+            meta.owners.iter().map(String::as_str).collect();
+        let baseline: std::collections::BTreeSet<&str> =
+            trusted.iter().map(String::as_str).collect();
+        if current == baseline {
+            continue;
+        }
+        let added: Vec<&str> = current.difference(&baseline).copied().collect();
+        let removed: Vec<&str> = baseline.difference(&current).copied().collect();
+        let mut parts = Vec::new();
+        if !added.is_empty() {
+            parts.push(format!("new owner(s): {}", added.join(", ")));
+        }
+        if !removed.is_empty() {
+            parts.push(format!("removed owner(s): {}", removed.join(", ")));
+        }
+        signals.push(RiskSignal {
+            id: "owners_changed".into(),
+            package: package.id.to_string(),
+            severity: Severity::Medium,
+            weight: 20,
+            confidence: 1.0,
+            evidence: vec![Evidence::new(
+                "registry",
+                format!(
+                    "crates.io owners changed since trusted ({}) — a new maintainer is the supply-chain takeover vector (xz, event-stream)",
+                    parts.join("; ")
+                ),
+            )],
+            recommendation:
+                "Verify the ownership change is legitimate, then refresh the baseline with `cargo rustinel trust`."
+                    .into(),
+        });
     }
 }
 
@@ -419,7 +489,18 @@ pub const POPULAR_CRATES: &[&str] = &[
 /// Flag dependencies whose name is exactly one edit away from a popular crate
 /// (Damerau-Levenshtein distance 1) — a likely typosquat / impersonation. The
 /// dependency itself must not be on the popular list.
-fn collect_typosquat(lock: &LockfileModel, signals: &mut Vec<RiskSignal>) {
+/// Download count at or above which a crate is considered established enough
+/// that a name collision with a popular crate is almost certainly coincidental
+/// (e.g. `miow` vs `mio`) rather than a typosquat. Below it, the collision is
+/// suspicious. Corroborating with adoption is what turns a noisy edit-distance
+/// heuristic into a precise signal.
+const TYPOSQUAT_TRUST_DOWNLOADS: u64 = 10_000;
+
+fn collect_typosquat(
+    lock: &LockfileModel,
+    options: &AnalysisOptions,
+    signals: &mut Vec<RiskSignal>,
+) {
     for package in lock.registry_packages() {
         let name = package.id.name.as_str();
         if POPULAR_CRATES.contains(&name) || is_known_good(name) {
@@ -429,25 +510,112 @@ fn collect_typosquat(lock: &LockfileModel, signals: &mut Vec<RiskSignal>) {
         if name.len() < 4 {
             continue;
         }
-        if let Some(target) = nearest_popular(name) {
-            signals.push(RiskSignal {
+        let Some(target) = nearest_popular(name) else {
+            continue;
+        };
+        // Corroborate against registry adoption. A name one edit from a popular
+        // crate is only suspicious when the crate is *also* obscure; an
+        // established crate that merely looks similar (e.g. `miow`) is not a
+        // typosquat. Without metadata we cannot tell, so we emit a quiet hint
+        // rather than a misleading Medium finding.
+        let downloads = options
+            .metadata
+            .get(&package.id.to_string())
+            .and_then(|m| m.total_downloads);
+        let base =
+            format!("crate name `{name}` is one edit away from the popular crate `{target}`");
+        let signal = match downloads {
+            // Established crate that merely looks similar — not a typosquat.
+            Some(d) if d >= TYPOSQUAT_TRUST_DOWNLOADS => continue,
+            // Name-similar AND obscure — a strong typosquat suspect.
+            Some(d) => RiskSignal {
                 id: "possible_typosquat".into(),
                 package: package.id.to_string(),
                 severity: Severity::Medium,
                 weight: 18,
-                confidence: 0.5,
+                confidence: 0.85,
                 evidence: vec![Evidence::new(
                     "heuristic",
-                    format!(
-                        "crate name `{name}` is one edit away from the popular crate `{target}` — possible typosquat"
-                    ),
+                    format!("{base}, and has only {d} downloads — likely typosquat / impersonation"),
                 )],
                 recommendation:
-                    "Confirm this is the crate you intended; verify the publisher and source before depending on it."
+                    "Verify the publisher and source; this is very likely not the crate you intended."
                         .into(),
-            });
-        }
+            },
+            // No registry metadata to corroborate (offline / --online-metadata off).
+            None => RiskSignal {
+                id: "possible_typosquat".into(),
+                package: package.id.to_string(),
+                severity: Severity::Info,
+                weight: 0,
+                confidence: 0.3,
+                evidence: vec![Evidence::new(
+                    "heuristic",
+                    format!("{base} — trust unverified offline (re-run with --online-metadata)"),
+                )],
+                recommendation:
+                    "Run with --online-metadata to corroborate against download counts before acting."
+                        .into(),
+            },
+        };
+        signals.push(signal);
     }
+}
+
+/// Versions published within this many days are flagged as freshly published —
+/// the window in which a supply-chain attack lives before anyone, including the
+/// advisory databases, has reviewed it.
+const FRESH_DAYS: u64 = 14;
+
+/// Emit a signal for any crates.io dependency whose *locked version* was
+/// published very recently. "New == unreviewed" — this is the proactive,
+/// pre-advisory signal that a database-only scanner (cargo-audit) cannot
+/// produce, because it exists before any advisory is ever filed.
+fn collect_freshness(
+    lock: &LockfileModel,
+    options: &AnalysisOptions,
+    signals: &mut Vec<RiskSignal>,
+) {
+    for package in lock.registry_packages() {
+        let Some(meta) = options.metadata.get(&package.id.to_string()) else {
+            continue;
+        };
+        let Some(days) = meta.published_days_ago else {
+            continue;
+        };
+        if days > FRESH_DAYS {
+            continue;
+        }
+        signals.push(RiskSignal {
+            id: "freshly_published".into(),
+            package: package.id.to_string(),
+            severity: Severity::Low,
+            weight: 6,
+            confidence: 1.0,
+            evidence: vec![Evidence::new(
+                "registry",
+                format!(
+                    "version published {days} day(s) ago — recently published code has had little time for review or for advisories to surface"
+                ),
+            )],
+            recommendation:
+                "Confirm this version bump is intended; freshly published versions are the window for supply-chain attacks."
+                    .into(),
+        });
+    }
+}
+
+/// Public selector: the popular crate this name is a possible typosquat of
+/// (Damerau-Levenshtein distance 1), if it is a candidate worth corroborating.
+///
+/// The CLI uses this to fetch registry metadata only for the handful of typosquat
+/// candidates in a lockfile, instead of querying every dependency — keeping the
+/// online lookup cheap and polite to crates.io.
+pub fn typosquat_target(name: &str) -> Option<&'static str> {
+    if POPULAR_CRATES.contains(&name) || is_known_good(name) || name.len() < 4 {
+        return None;
+    }
+    nearest_popular(name)
 }
 
 /// The first popular crate at Damerau-Levenshtein distance exactly 1, if any.
@@ -735,6 +903,66 @@ pub const KNOWN_GOOD_CRATES: &[&str] = &[
     "smallvec",
     "rustix",
     "getrandom",
+    // Legit, established crates (>=100k downloads) that sit one edit from a
+    // popular crate; confirmed non-typosquats from a full crates.io db-dump scan.
+    "base62",
+    "bhttp",
+    "boml",
+    "byte",
+    "cfg-iif",
+    "chttp",
+    "clamp",
+    "cmac",
+    "coap",
+    "cuid",
+    "ehttp",
+    "ghash",
+    "httm",
+    "http2",
+    "hyper2",
+    "hyperx",
+    "hypher",
+    "idea",
+    "index-map",
+    "iter_tools",
+    "lhash",
+    "lib0",
+    "libm",
+    "manyhow",
+    "mise",
+    "nbytes",
+    "nuid",
+    "objekt",
+    "ohttp",
+    "openssh",
+    "pastel",
+    "pastey",
+    "pasts",
+    "ping",
+    "pmac",
+    "rbase64",
+    "rend",
+    "rinf",
+    "rlibc",
+    "rustis",
+    "rxing",
+    "serde_json5",
+    "serde_yaml2",
+    "serde_yml",
+    "sha-1",
+    "shaq",
+    "socket",
+    "str0m",
+    "tdigest",
+    "temp-file",
+    "tide",
+    "timer",
+    "tokio-utils",
+    "tomlq",
+    "uguid",
+    "ulid",
+    "utime",
+    "uuid7",
 ];
 
 /// Whether a crate is on the built-in known-good baseline (case-sensitive,
@@ -747,13 +975,17 @@ pub fn is_known_good(name: &str) -> bool {
 /// zero weight, appending a note. Advisory findings are left untouched.
 fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
     for signal in signals.iter_mut() {
-        // Advisory matches, yanked status and *suspicious* build scripts are
-        // strong evidence, never suppressed by the baseline.
+        // Advisory matches, yanked status, *suspicious* build scripts, typosquats
+        // and ownership changes are strong evidence, never suppressed by the
+        // baseline. Ownership change in particular MUST survive the baseline: the
+        // xz and event-stream takeovers happened on ubiquitous, "known-good"
+        // crates — silencing it there would blind the signal to its main target.
         if signal.id.starts_with("advisory_")
             || signal.id == "yanked_crate"
             || signal.id == "build_script_suspicious"
             || signal.id == "suspicious_source_exfil"
             || signal.id == "possible_typosquat"
+            || signal.id == "owners_changed"
         {
             continue;
         }
@@ -1335,6 +1567,210 @@ mod tests {
         }
     }
 
+    fn opts_with_meta(pairs: &[(&str, crate::CrateMetadata)]) -> AnalysisOptions {
+        let mut metadata = std::collections::BTreeMap::new();
+        for (k, m) in pairs {
+            metadata.insert((*k).to_string(), m.clone());
+        }
+        AnalysisOptions {
+            metadata,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn typosquat_cleared_by_high_downloads() {
+        // `miow` is one edit from `mio` but is a legitimate, widely-used crate
+        // (53M downloads). High adoption must suppress the typosquat flag.
+        let lk = lock(vec![pkg("miow", "0.6.1", false)]);
+        let opts = opts_with_meta(&[(
+            "miow@0.6.1",
+            crate::CrateMetadata {
+                total_downloads: Some(53_000_000),
+                ..Default::default()
+            },
+        )]);
+        let mut sig = vec![];
+        collect_typosquat(&lk, &opts, &mut sig);
+        assert!(
+            sig.iter().all(|s| s.id != "possible_typosquat"),
+            "established crate must not be flagged as a typosquat"
+        );
+    }
+
+    #[test]
+    fn typosquat_flagged_when_obscure() {
+        // A name one edit from `mio` with almost no downloads IS a suspect.
+        let lk = lock(vec![pkg("miow", "0.0.1", false)]);
+        let opts = opts_with_meta(&[(
+            "miow@0.0.1",
+            crate::CrateMetadata {
+                total_downloads: Some(42),
+                ..Default::default()
+            },
+        )]);
+        let mut sig = vec![];
+        collect_typosquat(&lk, &opts, &mut sig);
+        let f = sig
+            .iter()
+            .find(|s| s.id == "possible_typosquat")
+            .expect("obscure look-alike must be flagged");
+        assert_eq!(f.severity, Severity::Medium);
+    }
+
+    #[test]
+    fn typosquat_offline_is_quiet_info() {
+        // Without metadata we cannot corroborate, so emit a quiet Info hint, never
+        // a misleading Medium finding (the `miow` false-positive regression).
+        let lk = lock(vec![pkg("miow", "0.6.1", false)]);
+        let opts = AnalysisOptions::default();
+        let mut sig = vec![];
+        collect_typosquat(&lk, &opts, &mut sig);
+        let f = sig
+            .iter()
+            .find(|s| s.id == "possible_typosquat")
+            .expect("offline hint present");
+        assert_eq!(f.severity, Severity::Info);
+    }
+
+    #[test]
+    fn freshness_flags_only_recent_versions() {
+        let lk = lock(vec![pkg("somecrate", "1.0.0", false)]);
+        let fresh = opts_with_meta(&[(
+            "somecrate@1.0.0",
+            crate::CrateMetadata {
+                published_days_ago: Some(3),
+                ..Default::default()
+            },
+        )]);
+        let mut sig = vec![];
+        collect_freshness(&lk, &fresh, &mut sig);
+        assert_eq!(
+            sig.iter().filter(|s| s.id == "freshly_published").count(),
+            1,
+            "a 3-day-old version must be flagged fresh"
+        );
+
+        let old = opts_with_meta(&[(
+            "somecrate@1.0.0",
+            crate::CrateMetadata {
+                published_days_ago: Some(400),
+                ..Default::default()
+            },
+        )]);
+        let mut sig2 = vec![];
+        collect_freshness(&lk, &old, &mut sig2);
+        assert!(sig2.is_empty(), "an old version must not be flagged fresh");
+    }
+
+    fn opts_with_owners(meta: &[(&str, &[&str])], trusted: &[(&str, &[&str])]) -> AnalysisOptions {
+        let mut metadata = std::collections::BTreeMap::new();
+        for (k, owners) in meta {
+            metadata.insert(
+                (*k).to_string(),
+                crate::CrateMetadata {
+                    owners: owners.iter().map(|s| s.to_string()).collect(),
+                    ..Default::default()
+                },
+            );
+        }
+        let mut trusted_owners = std::collections::BTreeMap::new();
+        for (k, owners) in trusted {
+            trusted_owners.insert(
+                (*k).to_string(),
+                owners.iter().map(|s| s.to_string()).collect(),
+            );
+        }
+        AnalysisOptions {
+            metadata,
+            trusted_owners,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn owners_changed_flags_new_maintainer() {
+        // The xz scenario: trusted owner set was [Lasse]; it is now [Lasse, JiaT75]
+        // — a new maintainer appeared. That must be flagged.
+        let lk = lock(vec![pkg("xz2", "0.1.7", false)]);
+        let opts = opts_with_owners(
+            &[("xz2@0.1.7", &["Lasse", "JiaT75"])],
+            &[("xz2", &["Lasse"])],
+        );
+        let mut sig = vec![];
+        collect_owners_changed(&lk, &opts, &mut sig);
+        let f = sig
+            .iter()
+            .find(|s| s.id == "owners_changed")
+            .expect("a new maintainer must be flagged");
+        assert_eq!(f.severity, Severity::Medium);
+        assert!(f.evidence[0].summary.contains("JiaT75"));
+    }
+
+    #[test]
+    fn owners_unchanged_emits_nothing() {
+        let lk = lock(vec![pkg("serde", "1.0.0", false)]);
+        let opts = opts_with_owners(&[("serde@1.0.0", &["dtolnay"])], &[("serde", &["dtolnay"])]);
+        let mut sig = vec![];
+        collect_owners_changed(&lk, &opts, &mut sig);
+        assert!(sig.is_empty(), "unchanged owners must not be flagged");
+    }
+
+    #[test]
+    fn owners_without_baseline_emits_nothing() {
+        // No baseline means no reference point — we cannot (and must not) claim a
+        // change. Trust is established first, detected second.
+        let lk = lock(vec![pkg("serde", "1.0.0", false)]);
+        let opts = opts_with_owners(&[("serde@1.0.0", &["newowner"])], &[]);
+        let mut sig = vec![];
+        collect_owners_changed(&lk, &opts, &mut sig);
+        assert!(sig.is_empty(), "no baseline -> no signal");
+    }
+
+    #[test]
+    fn owners_changed_survives_known_good_baseline() {
+        // The xz / event-stream takeovers hit ubiquitous, "known-good" crates, so
+        // an ownership change there must NOT be downgraded by the baseline.
+        assert!(is_known_good("libc"), "test premise: libc is known-good");
+        let lk = lock(vec![pkg("libc", "0.2.0", false)]);
+        let opts = opts_with_owners(
+            &[("libc@0.2.0", &["alice", "mallory"])],
+            &[("libc", &["alice"])],
+        );
+        let signals = collect_basic_signals(&lk, &opts).unwrap();
+        let f = signals
+            .iter()
+            .find(|s| s.id == "owners_changed")
+            .expect("owners_changed present");
+        assert_eq!(
+            f.severity,
+            Severity::Medium,
+            "ownership change must survive the known-good baseline"
+        );
+        assert!(f.weight > 0, "must still count toward risk");
+    }
+
+    #[test]
+    fn owners_changed_detected_on_later_version_without_first_metadata() {
+        // Lower version has no owner metadata; the higher one has a changed owner
+        // set. The change must still be detected (no dedup short-circuit).
+        let lk = lock(vec![
+            pkg("foo-crate", "1.0.0", false),
+            pkg("foo-crate", "2.0.0", false),
+        ]);
+        let opts = opts_with_owners(
+            &[("foo-crate@2.0.0", &["alice", "newowner"])],
+            &[("foo-crate", &["alice"])],
+        );
+        let mut sig = vec![];
+        collect_owners_changed(&lk, &opts, &mut sig);
+        assert_eq!(
+            sig.iter().filter(|s| s.id == "owners_changed").count(),
+            1,
+            "ownership change on a non-first version must be detected"
+        );
+    }
+
     #[test]
     fn locate_crate_dir_rejects_path_traversal() {
         // A hostile lockfile cannot make us resolve a directory outside the root.
@@ -1402,7 +1838,7 @@ mod tests {
     fn detects_typosquat_one_edit_away() {
         let model = lock(vec![pkg("reqwset", "1.0.0", false)]); // transposition of reqwest
         let mut signals = vec![];
-        collect_typosquat(&model, &mut signals);
+        collect_typosquat(&model, &AnalysisOptions::default(), &mut signals);
         let s = signals
             .iter()
             .find(|s| s.id == "possible_typosquat")
@@ -1420,7 +1856,7 @@ mod tests {
             pkg("serde", "1.0.0", false), // exact popular -> not flagged
         ]);
         let mut signals = vec![];
-        collect_typosquat(&model, &mut signals);
+        collect_typosquat(&model, &AnalysisOptions::default(), &mut signals);
         assert!(signals.is_empty(), "false positives: {signals:?}");
     }
 
@@ -1435,7 +1871,7 @@ mod tests {
             pkg("anes", "0.1.6", false),
         ]);
         let mut signals = vec![];
-        collect_typosquat(&model, &mut signals);
+        collect_typosquat(&model, &AnalysisOptions::default(), &mut signals);
         assert!(signals.is_empty(), "false positives: {signals:?}");
     }
 
