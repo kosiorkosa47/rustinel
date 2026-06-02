@@ -22,6 +22,14 @@ phone home**, and **dependencies that read your source and exfiltrate secrets**
 — the exact class of the September 2025 `faster_log`/`async_println` crypto-stealers.
 Static, offline-first, and emits compliance-grade **SBOM + VEX**.
 
+<p align="center">
+  <img src="assets/demo.gif" width="820" alt="rustinel checking the real 292-package Alacritty dependency tree: it matches the same advisory as cargo-audit (bytes RUSTSEC-2026-0007) and additionally flags a typosquat (miow, one edit from mio) that an advisory-only scanner cannot see">
+</p>
+
+<p align="center">
+  <sub><a href="assets/demo.mp4">▶ watch the full recording (MP4)</a> — a real scan, cross-checked live against <code>cargo audit</code></sub>
+</p>
+
 ```text
 Project risk: 67/100 HIGH
   [█████████████░░░░░░░]
