@@ -283,29 +283,36 @@ pub fn to_markdown(report: &SentinelReport) -> String {
         report.packages_count
     ));
 
-    let contributors: Vec<&RiskSignal> = report
+    // Split contributors into known advisories (parity with cargo-audit) and
+    // proactive signals (the pre-advisory risk an advisory-only scanner cannot
+    // see). Surfacing the second group on every PR is rustinel's reason to exist.
+    let advisories: Vec<&RiskSignal> = report
         .findings
         .iter()
-        .filter(|f| f.severity > Severity::Info)
-        .take(10)
+        .filter(|f| f.severity > Severity::Info && is_advisory(&f.id))
         .collect();
-    if !contributors.is_empty() {
-        out.push_str("### Top risk contributors\n\n");
-        for f in contributors.iter() {
-            let detail = f
-                .evidence
-                .first()
-                .map(|e| e.summary.as_str())
-                .unwrap_or(&f.id);
-            out.push_str(&format!(
-                "- {} `{}` — {}\n",
-                severity_marker(f.severity),
-                markdown::escape_code(&f.package),
-                markdown::escape(first_line(detail))
-            ));
-            if let Some(path) = path_evidence(f) {
-                out.push_str(&format!("  - {}\n", markdown::escape(path)));
-            }
+    let signals: Vec<&RiskSignal> = report
+        .findings
+        .iter()
+        .filter(|f| f.severity > Severity::Info && !is_advisory(&f.id))
+        .collect();
+
+    if !advisories.is_empty() {
+        out.push_str("### Known advisories\n");
+        out.push_str("<sub>matched against the RustSec database — the same set `cargo audit` reports</sub>\n\n");
+        for f in advisories.iter().take(10) {
+            render_contributor(&mut out, f);
+        }
+        out.push('\n');
+    }
+    if !signals.is_empty() {
+        out.push_str("### Proactive signals\n");
+        out.push_str(
+            "<sub>structural risk an advisory-only scanner reports none of — \
+             [why](https://github.com/kosiorkosa47/rustinel/blob/main/docs/PROACTIVE-DETECTION.md)</sub>\n\n",
+        );
+        for f in signals.iter().take(10) {
+            render_contributor(&mut out, f);
         }
         out.push('\n');
     }
@@ -353,6 +360,10 @@ pub fn to_markdown(report: &SentinelReport) -> String {
         out.push_str("</details>\n");
     }
 
+    out.push_str(
+        "\n<sub>rustinel · static, offline supply-chain risk diff for Cargo · \
+         matches `cargo audit` on advisories, adds the pre-advisory signals it can't see</sub>\n",
+    );
     out
 }
 
@@ -365,6 +376,32 @@ fn render_list(out: &mut String, title: &str, items: &[String]) {
             out.push_str(&format!("- `{}`\n", markdown::escape_code(item)));
         }
         out.push('\n');
+    }
+}
+
+/// A finding produced by matching the RustSec advisory database (id prefixed
+/// `advisory_`), as opposed to a proactive static/metadata signal.
+fn is_advisory(id: &str) -> bool {
+    id.starts_with("advisory_")
+}
+
+/// Render one finding as a Markdown bullet: severity, package, the first line of
+/// its evidence, and the dependency path when known. Shared by both the advisory
+/// and proactive-signal sections of the PR comment.
+fn render_contributor(out: &mut String, f: &RiskSignal) {
+    let detail = f
+        .evidence
+        .first()
+        .map(|e| e.summary.as_str())
+        .unwrap_or(&f.id);
+    out.push_str(&format!(
+        "- {} `{}` — {}\n",
+        severity_marker(f.severity),
+        markdown::escape_code(&f.package),
+        markdown::escape(first_line(detail))
+    ));
+    if let Some(path) = path_evidence(f) {
+        out.push_str(&format!("  - {}\n", markdown::escape(path)));
     }
 }
 

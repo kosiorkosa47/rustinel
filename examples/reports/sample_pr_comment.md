@@ -1,10 +1,11 @@
 ## rustinel — supply-chain risk
 
-▃ **0 → 24 (+24)** · MEDIUM · Decision: [review] **review required**
+▁ **0 → 16 (+16)** · LOW · Decision: [review] **review required**
 
-`[████░░░░░░░░░░░░░░░░]`  ·  policy: **balanced**  ·  5 packages
+`[███░░░░░░░░░░░░░░░░░]`  ·  policy: **balanced**  ·  5 packages
 
-### Top risk contributors
+### Proactive signals
+<sub>structural risk an advisory-only scanner reports none of — [why](https://github.com/kosiorkosa47/rustinel/blob/main/docs/PROACTIVE-DETECTION.md)</sub>
 
 - [med]  `openssl-sys@0.9.99` — crate name ends with \`-sys\`, a convention for native/FFI bindings
   - pulled in via: demo → openssl-sys
@@ -38,3 +39,5 @@ Removed:
 - none
 
 </details>
+
+<sub>rustinel · static, offline supply-chain risk diff for Cargo · matches `cargo audit` on advisories, adds the pre-advisory signals it can't see</sub>
