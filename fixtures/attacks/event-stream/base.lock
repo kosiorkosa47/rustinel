@@ -1,0 +1,14 @@
+# Reconstruction of the event-stream takeover (2018), base state: an established
+# stream utility maintained by its original author, with no extra dependency.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["eventstream"]
+
+[[package]]
+name = "eventstream"
+version = "3.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"

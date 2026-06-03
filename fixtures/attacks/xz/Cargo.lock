@@ -1,0 +1,16 @@
+# Reconstruction of the xz / liblzma maintainer-takeover (CVE-2024-3094) as a
+# Cargo scenario. The real attack was in a C project; here an established
+# compression crate gains a new co-owner. rustinel flags the ownership change
+# from a committed trust baseline — before any advisory exists.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["liblzma-rs"]
+
+[[package]]
+name = "liblzma-rs"
+version = "5.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"

@@ -1,0 +1,23 @@
+# Reconstruction of the event-stream takeover (2018), head state: a new
+# maintainer published a new minor version that pulls in a freshly published
+# dependency (the real attack added `flatmap-stream`). The PR diff introduces
+# both precursors at once — a new owner and a brand-new transitive dependency.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["eventstream"]
+
+[[package]]
+name = "eventstream"
+version = "3.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+dependencies = ["flatmap-stream"]
+
+[[package]]
+name = "flatmap-stream"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
