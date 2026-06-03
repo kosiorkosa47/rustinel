@@ -105,3 +105,39 @@ fn event_stream_new_owner_and_fresh_dep_flagged_before_any_advisory() {
         "the freshly added dependency must be flagged",
     );
 }
+
+/// **faster_log / async_println (crates.io, September 2025).** A typosquatted
+/// logging crate that harvested crypto keys from the consuming project's *log*
+/// files and exfiltrated them to a `*.workers.dev` endpoint. Because it scanned
+/// logs, not `.rs` source, the source-scan fingerprint alone misses it — the
+/// exfil-domain reputation signal catches it, statically, with the malicious
+/// code never executed. An advisory scanner misses it (no advisory yet) and a
+/// build-time sandbox misses it too (the payload is runtime, not `build.rs`).
+#[test]
+fn faster_log_class_exfil_domain_flagged_statically() {
+    let lock = fixtures().join("attacks/faster-log/Cargo.lock");
+    let options = AnalysisOptions {
+        offline: true,
+        advisory_db_path: Some(PathBuf::from("/nonexistent-rustinel-proactive-test-db")),
+        source_path: Some(fixtures().join("mock_registry")),
+        ..Default::default()
+    };
+    let report = analyze_lockfile(&lock, options).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.id == "suspicious_exfil_domain" && f.package == "faster-log@0.1.0"),
+        "the *.workers.dev exfil endpoint must be flagged",
+    );
+    // The source-scan fingerprint stays silent: the crate reads *logs*, not the
+    // project's `.rs` files. The exfil-domain reputation is what catches it.
+    assert!(
+        !report
+            .findings
+            .iter()
+            .any(|f| f.id == "suspicious_source_exfil" && f.package == "faster-log@0.1.0"),
+        "source-scan fingerprint should NOT fire (the crate reads logs, not .rs)",
+    );
+}

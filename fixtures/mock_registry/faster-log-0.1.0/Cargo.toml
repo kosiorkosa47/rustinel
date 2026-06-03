@@ -1,0 +1,5 @@
+[package]
+name = "faster-log"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture: reconstruction of the faster_log crypto-stealer (crates.io, Sept 2025)."

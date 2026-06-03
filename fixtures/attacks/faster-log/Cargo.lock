@@ -1,0 +1,15 @@
+# Reconstruction of the faster_log / async_println crypto-stealer (crates.io,
+# Sept 2025): a typosquatted logging crate that harvested keys from the
+# project's log files and exfiltrated them to a *.workers.dev endpoint.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["faster-log"]
+
+[[package]]
+name = "faster-log"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"

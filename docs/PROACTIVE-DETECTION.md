@@ -79,6 +79,36 @@ $ cargo rustinel check --online-metadata
 `bytes` genuinely moved to the `tokio-rs` org — a **legitimate** change. That is
 the point of the next section.
 
+## Catching a real 2025 attack — statically
+
+The two reconstructions above are about *maintainers*. rustinel also reads the
+crate's actual source — statically, never executing it. In September 2025 two
+malicious crates, `faster_log` and `async_println`, typosquatted popular logging
+libraries, harvested Ethereum and Solana keys from the consuming project's **log
+files**, and exfiltrated them to a `*.workers.dev` endpoint. They were pulled
+the same day they were reported (by Socket's threat-research team).
+
+rustinel flags the exfiltration endpoint from a static read
+([`tests/proactive_attacks.rs`](../crates/rustinel-core/tests/proactive_attacks.rs)):
+
+```
+[MED] faster-log@0.1.0: runtime source references `.workers.dev`, a domain
+      class commonly used for data exfiltration (scanned statically, never
+      executed)
+```
+
+This case pins down *why static analysis matters*:
+
+- `cargo audit` is blind — there is no advisory in the window before disclosure.
+- A **build-time sandbox** (e.g. OpenSSF Package Analysis) is also blind here: it
+  runs `cargo build`, but `faster_log`'s payload was **runtime**, not in
+  `build.rs`, so it never executes during a sandboxed build.
+- rustinel reads *all* the source statically, so the `*.workers.dev` drop is
+  visible without running anything — and `faster_log` scanned *log* files rather
+  than `.rs` source, so even rustinel's own source-scan fingerprint
+  (`suspicious_source_exfil`) misses it; the exfil-domain reputation is what
+  catches it.
+
 ## Honest framing: a review-trigger, not a malware oracle
 
 rustinel does **not** claim `bytes` is malicious, and it cannot decode a hidden
@@ -103,6 +133,7 @@ claim is narrow and honest:
 | PR adds a freshly published dependency (pre-CVE) | blind | `freshly_published` |
 | Dependency name is one edit from a popular crate | blind | `possible_typosquat` |
 | `build.rs` makes a network call (static read) | blind | `build_script_suspicious` |
+| Runtime crypto-stealer exfiltrating to a Workers/webhook/paste drop (faster_log, Sept 2025) | blind | `suspicious_exfil_domain` |
 
 rustinel matches `cargo audit` on advisories and adds the pre-advisory signals it
 structurally cannot produce — statically, offline, and without ever executing a

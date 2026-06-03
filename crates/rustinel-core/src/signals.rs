@@ -715,11 +715,36 @@ const SOURCE_SCAN: &[&str] = &[
     "fs::read",
 ];
 
+/// Domain classes that almost never appear in a legitimate library's *runtime*
+/// source but are common data-exfiltration channels. Cloudflare Workers
+/// (`*.workers.dev`) is where the faster_log crypto-stealer (Sept 2025) sent the
+/// keys it harvested; Telegram, IP-geolocation, paste and webhook services are
+/// the usual drop endpoints. Matched as substrings, scanned statically, never
+/// executed.
+const SUSPICIOUS_EXFIL_DOMAINS: &[&str] = &[
+    ".workers.dev",
+    "api.telegram.org",
+    "ip-api.com",
+    "discord.com/api/webhooks",
+    "discordapp.com/api/webhooks",
+    "pastebin.com",
+    "paste.ee",
+    "transfer.sh",
+    "0x0.st",
+    "webhook.site",
+    "requestbin",
+    "pipedream.net",
+    ".ngrok.io",
+    ".ngrok-free.app",
+    "anonfiles.com",
+];
+
 #[derive(Default)]
 struct ExfilScan {
     network: bool,
     scans_source: bool,
     secrets: bool,
+    exfil_domain: Option<String>,
 }
 
 /// Scan a crate's `src` tree (read-only, bounded, symlink-safe) for the runtime
@@ -759,7 +784,13 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<(ExfilScan, PathBuf)> {
                     let scans = c.contains("\".rs\"") && SOURCE_SCAN.iter().any(|m| c.contains(m));
                     let net = BUILD_RS_NETWORK.iter().any(|m| c.contains(m));
                     let sec = SECRET_MARKERS.iter().any(|m| c.contains(m));
-                    if scans && sample.is_none() {
+                    let domain_here = SUSPICIOUS_EXFIL_DOMAINS.iter().find(|d| c.contains(**d));
+                    if found.exfil_domain.is_none() {
+                        if let Some(d) = domain_here {
+                            found.exfil_domain = Some((*d).to_string());
+                        }
+                    }
+                    if (scans || domain_here.is_some()) && sample.is_none() {
                         sample = Some(path.clone());
                     }
                     found.scans_source |= scans;
@@ -808,6 +839,34 @@ fn source_exfil_signal(package: &str, scan: &ExfilScan, path: String) -> Option<
              certainly malicious. Do not build it; report it to the registry."
                 .into(),
     })
+}
+
+/// Build a `suspicious_exfil_domain` signal when a crate's runtime source
+/// hard-codes a domain from a known data-exfiltration class. Unlike
+/// `suspicious_source_exfil` this does **not** require the crate to read the
+/// project's `.rs` files — the faster_log stealer harvested keys from *log*
+/// files and shipped them to a `*.workers.dev` endpoint, which the source-scan
+/// fingerprint alone would miss.
+fn exfil_domain_signal(package: &str, domain: &str, path: String) -> RiskSignal {
+    RiskSignal {
+        id: "suspicious_exfil_domain".into(),
+        package: package.to_string(),
+        severity: Severity::Medium,
+        weight: 18,
+        confidence: 0.5,
+        evidence: vec![Evidence::with_path(
+            "source",
+            path,
+            format!(
+                "runtime source references `{domain}`, a domain class commonly used for data exfiltration (scanned statically, never executed)"
+            ),
+        )],
+        recommendation:
+            "Confirm why this dependency contacts that endpoint. Cloudflare Workers, Telegram, \
+             IP-geolocation and paste/webhook services are common exfiltration channels — the \
+             faster_log crypto-stealer (Sept 2025) shipped harvested keys to a `*.workers.dev` URL."
+                .into(),
+    }
 }
 
 /// Build an optional `build_script_suspicious` signal from a build.rs body.
@@ -1133,6 +1192,16 @@ fn collect_source_signals(
                 rel_display(source_root, &sample),
             ) {
                 signals.push(sig);
+            }
+            // Exfil-domain reputation: fires even when the crate does not read the
+            // project's `.rs` files (faster_log harvested *log* files), which the
+            // source-scan fingerprint alone would miss.
+            if let Some(domain) = scan.exfil_domain.as_deref() {
+                signals.push(exfil_domain_signal(
+                    &package.id.to_string(),
+                    domain,
+                    rel_display(source_root, &sample),
+                ));
             }
         }
     }
@@ -1882,6 +1951,7 @@ mod tests {
             scans_source: true,
             network: false,
             secrets: false,
+            exfil_domain: None,
         };
         assert!(source_exfil_signal("x@1", &only_scan, "lib.rs".into()).is_none());
         // network alone -> not enough (reqwest is a normal dependency).
@@ -1889,6 +1959,7 @@ mod tests {
             scans_source: false,
             network: true,
             secrets: false,
+            exfil_domain: None,
         };
         assert!(source_exfil_signal("x@1", &only_net, "lib.rs".into()).is_none());
         // scans source + secrets -> the malware fingerprint.
@@ -1896,6 +1967,7 @@ mod tests {
             scans_source: true,
             network: false,
             secrets: true,
+            exfil_domain: None,
         };
         let sig = source_exfil_signal("x@1", &bad, "lib.rs".into()).unwrap();
         assert_eq!(sig.id, "suspicious_source_exfil");
