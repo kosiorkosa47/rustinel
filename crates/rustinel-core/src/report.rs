@@ -183,10 +183,10 @@ pub fn to_human(report: &SentinelReport) -> String {
                 "  [{}] {}: {}\n",
                 severity_tag(f.severity),
                 f.package,
-                first_line(detail)
+                sanitize_terminal(first_line(detail))
             ));
             if let Some(path) = path_evidence(f) {
-                out.push_str(&format!("        ↳ {path}\n"));
+                out.push_str(&format!("        ↳ {}\n", sanitize_terminal(path)));
             }
         }
     }
@@ -194,13 +194,13 @@ pub fn to_human(report: &SentinelReport) -> String {
     if !report.policy.violations.is_empty() {
         out.push_str("\nPolicy violations:\n");
         for v in &report.policy.violations {
-            out.push_str(&format!("  - {v}\n"));
+            out.push_str(&format!("  - {}\n", sanitize_terminal(v)));
         }
     }
     if !report.policy.review_items.is_empty() {
         out.push_str("\nReview required:\n");
         for v in &report.policy.review_items {
-            out.push_str(&format!("  - {v}\n"));
+            out.push_str(&format!("  - {}\n", sanitize_terminal(v)));
         }
     }
     out
@@ -426,6 +426,30 @@ fn first_line(s: &str) -> &str {
     s.lines().next().unwrap_or(s)
 }
 
+/// Neutralize characters that could corrupt or spoof the plain-text terminal
+/// report: C0/C1 control codes (newlines forging fake report lines, ANSI `ESC`
+/// sequences recoloring/erasing output) and the bidirectional-override format
+/// characters behind "Trojan Source" visual spoofing. Untrusted text — a
+/// dependency's manifest `license` reflected into a policy message, or a
+/// filesystem path used as evidence — reaches the human renderer; the markdown
+/// renderer escapes the same fields via `markdown::escape`, and JSON/SARIF go
+/// through serde (which `\u`-escapes controls), so this is the terminal-output
+/// equivalent. Each offending character becomes a single space, keeping the
+/// field on one line and the attack inert without dropping legible content.
+fn sanitize_terminal(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            let bidi_override =
+                ('\u{202A}'..='\u{202E}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c);
+            if c.is_control() || bidi_override {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 /// A human-readable "how was this score computed" breakdown, appended to the
 /// `check`/`diff` report when `--explain` is set.
 pub fn score_explanation(report: &SentinelReport) -> String {
@@ -536,5 +560,36 @@ mod tests {
         let h = to_human(&sample_report());
         assert!(h.contains("rustinel"));
         assert!(h.contains("Decision: REVIEW_REQUIRED"));
+    }
+
+    #[test]
+    fn human_output_neutralizes_control_chars() {
+        // A denied-license string is attacker-controllable via a dependency's
+        // Cargo.toml. A newline must not forge a second report line and an ANSI
+        // ESC must not reach the terminal — the markdown renderer escapes the
+        // same field, so the human renderer must neutralize it too.
+        let mut report = sample_report();
+        report
+            .policy
+            .violations
+            .push("pkg uses denied license GPL-3.0\n  - all clear\u{1b}[2J".into());
+        let h = to_human(&report);
+        assert!(!h.contains('\u{1b}'), "ANSI ESC must be neutralized");
+        let line = h
+            .lines()
+            .find(|l| l.contains("GPL-3.0"))
+            .expect("the violation line is present");
+        assert!(
+            line.contains("all clear"),
+            "the newline must be neutralized so the injected text cannot form its own line"
+        );
+    }
+
+    #[test]
+    fn sanitize_terminal_replaces_controls_and_bidi() {
+        assert_eq!(sanitize_terminal("a\nb\tc"), "a b c");
+        assert_eq!(sanitize_terminal("x\u{1b}[31my"), "x [31my");
+        assert_eq!(sanitize_terminal("a\u{202E}b"), "a b");
+        assert_eq!(sanitize_terminal("normal text"), "normal text");
     }
 }

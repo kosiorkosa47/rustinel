@@ -869,7 +869,17 @@ fn sorted_dir_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut entries: Vec<_> = rd.flatten().collect();
+    // Bound the materialized set: a single hostile directory holding millions of
+    // entries must not be collected in full before the caller's per-entry
+    // MAX_DIR_ENTRIES cap applies. Taking one more than the whole-walk cap is
+    // always enough (the walk stops at MAX_DIR_ENTRIES total anyway), so for any
+    // real crate (far fewer files) every entry is still collected and the sort is
+    // fully deterministic; only a pathological directory is truncated, where
+    // reproducibility is moot.
+    let mut entries: Vec<_> = rd
+        .flatten()
+        .take(crate::safety::MAX_DIR_ENTRIES.saturating_add(1))
+        .collect();
     entries.sort_by_key(|e| e.file_name());
     entries
 }
