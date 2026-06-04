@@ -232,6 +232,11 @@ fn collect_yanked(lock: &LockfileModel, options: &AnalysisOptions, signals: &mut
         return;
     }
     for package in lock.registry_packages() {
+        // Yanked status was fetched from crates.io and keyed by bare name@version;
+        // a git/alt-registry crate sharing that id is a different package.
+        if !package.id.is_crates_io() {
+            continue;
+        }
         let id = package.id.to_string();
         if options.yanked.contains(&id) {
             signals.push(RiskSignal {
@@ -830,23 +835,23 @@ const SUSPICIOUS_EXFIL_DOMAINS: &[&str] = &[
 
 #[derive(Default)]
 struct ExfilScan {
-    network: bool,
-    scans_source: bool,
-    secrets: bool,
     exfil_domain: Option<String>,
-    /// A single runtime file reads an env var AND makes a network call AND spawns
-    /// a process — the env-gated remote-payload pattern (rustdecimal, 2022).
-    env_gated: bool,
     /// First file matching each fingerprint, so every emitted signal cites the
     /// file it actually applies to (rather than one shared, possibly-wrong path).
-    scans_sample: Option<PathBuf>,
     domain_sample: Option<PathBuf>,
     env_gated_sample: Option<PathBuf>,
+    /// The source-exfil conjunction must hold *within one file* (a single file both
+    /// reads the project's `.rs` files AND reaches the network or handles secrets),
+    /// not across the crate — otherwise a codegen helper reading `.rs` in one module
+    /// plus an HTTP client in an unrelated module would falsely fire the High signal.
+    source_exfil_sample: Option<PathBuf>,
+    source_exfil_network: bool,
+    source_exfil_secrets: bool,
 }
 
 impl ExfilScan {
     fn any_match(&self) -> bool {
-        self.scans_sample.is_some()
+        self.source_exfil_sample.is_some()
             || self.domain_sample.is_some()
             || self.env_gated_sample.is_some()
     }
@@ -898,8 +903,14 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
                         && (c.contains("Command::new")
                             || c.contains("process::Command")
                             || c.contains("libc::system"));
-                    if scans && found.scans_sample.is_none() {
-                        found.scans_sample = Some(path.clone());
+                    // faster_log/async_println conjunction must hold in ONE file:
+                    // a file that both reads the project's `.rs` files and reaches
+                    // the network or handles secrets. (Crate-wide OR would falsely
+                    // fire on a codegen helper + an unrelated HTTP client.)
+                    if scans && (net || sec) && found.source_exfil_sample.is_none() {
+                        found.source_exfil_sample = Some(path.clone());
+                        found.source_exfil_network = net;
+                        found.source_exfil_secrets = sec;
                     }
                     if let Some(d) = domain_here {
                         if found.exfil_domain.is_none() {
@@ -912,10 +923,6 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
                     if env_gated && found.env_gated_sample.is_none() {
                         found.env_gated_sample = Some(path.clone());
                     }
-                    found.scans_source |= scans;
-                    found.network |= net;
-                    found.secrets |= sec;
-                    found.env_gated |= env_gated;
                 }
             }
         }
@@ -926,18 +933,15 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
 /// Build the `suspicious_source_exfil` signal if a crate's runtime source both
 /// scans the project's `.rs` files AND either exfiltrates over the network or
 /// references secret/wallet material — the live crypto-stealer crate pattern.
-fn source_exfil_signal(package: &str, scan: &ExfilScan, path: String) -> Option<RiskSignal> {
-    if !(scan.scans_source && (scan.network || scan.secrets)) {
-        return None;
-    }
+fn source_exfil_signal(package: &str, network: bool, secrets: bool, path: String) -> RiskSignal {
     let mut what = Vec::new();
-    if scan.network {
+    if network {
         what.push("exfiltrates over the network");
     }
-    if scan.secrets {
+    if secrets {
         what.push("references wallet/private-key material");
     }
-    Some(RiskSignal {
+    RiskSignal {
         id: "suspicious_source_exfil".into(),
         package: package.to_string(),
         severity: Severity::High,
@@ -958,7 +962,7 @@ fn source_exfil_signal(package: &str, scan: &ExfilScan, path: String) -> Option<
             "A dependency that reads your source files and exfiltrates/handles secrets is almost \
              certainly malicious. Do not build it; report it to the registry."
                 .into(),
-    })
+    }
 }
 
 /// Build a `suspicious_exfil_domain` signal when a crate's runtime source
@@ -1340,12 +1344,13 @@ fn collect_source_signals(
         // path — otherwise an env-gated payload in file B could be attributed to
         // file A which merely held the exfil domain.
         if let Some(scan) = scan_source_exfil(&crate_dir) {
-            if let Some(s) = &scan.scans_sample {
-                if let Some(sig) =
-                    source_exfil_signal(&package.id.to_string(), &scan, rel_display(source_root, s))
-                {
-                    signals.push(sig);
-                }
+            if let Some(s) = &scan.source_exfil_sample {
+                signals.push(source_exfil_signal(
+                    &package.id.to_string(),
+                    scan.source_exfil_network,
+                    scan.source_exfil_secrets,
+                    rel_display(source_root, s),
+                ));
             }
             // Exfil-domain reputation: fires even when the crate does not read the
             // project's `.rs` files (faster_log harvested *log* files).
@@ -2103,37 +2108,101 @@ mod tests {
         assert!(signals.is_empty(), "false positives: {signals:?}");
     }
 
+    /// Build a throwaway crate dir under the temp dir with the given
+    /// `relative-path -> contents` files inside a `src/` tree. Returned guard
+    /// removes the dir on drop. No external crates (no `tempfile`).
+    fn scratch_crate(tag: &str, files: &[(&str, &str)]) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rustinel_exfil_{}_{}_{}",
+            tag,
+            std::process::id(),
+            files.len()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for (rel, body) in files {
+            let p = root.join("src").join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&p, body).unwrap();
+        }
+        root
+    }
+
     #[test]
-    fn source_exfil_requires_conjunction() {
-        // scans source alone -> not enough (could be a legit codegen tool).
-        let only_scan = ExfilScan {
-            scans_source: true,
-            network: false,
-            secrets: false,
-            exfil_domain: None,
-            ..Default::default()
-        };
-        assert!(source_exfil_signal("x@1", &only_scan, "lib.rs".into()).is_none());
-        // network alone -> not enough (reqwest is a normal dependency).
-        let only_net = ExfilScan {
-            scans_source: false,
-            network: true,
-            secrets: false,
-            exfil_domain: None,
-            ..Default::default()
-        };
-        assert!(source_exfil_signal("x@1", &only_net, "lib.rs".into()).is_none());
-        // scans source + secrets -> the malware fingerprint.
-        let bad = ExfilScan {
-            scans_source: true,
-            network: false,
-            secrets: true,
-            exfil_domain: None,
-            ..Default::default()
-        };
-        let sig = source_exfil_signal("x@1", &bad, "lib.rs".into()).unwrap();
+    fn source_exfil_signal_builds_high() {
+        // The signal builder always fires once the caller has confirmed the
+        // per-file conjunction; it just renders the `what` prose.
+        let sig = source_exfil_signal("x@1", false, true, "lib.rs".into());
         assert_eq!(sig.id, "suspicious_source_exfil");
         assert_eq!(sig.severity, Severity::High);
+        assert!(sig
+            .evidence
+            .iter()
+            .any(|e| e.summary.contains("wallet/private-key")));
+        let sig = source_exfil_signal("x@1", true, false, "lib.rs".into());
+        assert!(sig
+            .evidence
+            .iter()
+            .any(|e| e.summary.contains("exfiltrates over the network")));
+    }
+
+    #[test]
+    fn source_exfil_conjunction_must_hold_in_one_file() {
+        // scans-source alone -> not the fingerprint (legit codegen helper).
+        let only_scan = scratch_crate(
+            "scan",
+            &[(
+                "codegen.rs",
+                "let _ = std::fs::read_dir(\".\"); let x = \".rs\";",
+            )],
+        );
+        assert!(scan_source_exfil(&only_scan)
+            .and_then(|s| s.source_exfil_sample)
+            .is_none());
+        let _ = std::fs::remove_dir_all(&only_scan);
+
+        // CROSS-FILE: one file scans `.rs` sources, a *separate* file uses
+        // reqwest. A benign crate (codegen + HTTP client) must NOT be flagged.
+        // This is the false-attribution bug the per-file conjunction fixes.
+        let cross = scratch_crate(
+            "cross",
+            &[
+                (
+                    "codegen.rs",
+                    "fn g(){ let _=std::fs::read_dir(\".\"); let _=\".rs\"; }",
+                ),
+                (
+                    "client.rs",
+                    "fn f(){ let _ = reqwest::blocking::get(\"http://x\"); }",
+                ),
+            ],
+        );
+        assert!(
+            scan_source_exfil(&cross)
+                .and_then(|s| s.source_exfil_sample)
+                .is_none(),
+            "cross-file scan + network must NOT fire (benign codegen + HTTP client)"
+        );
+        let _ = std::fs::remove_dir_all(&cross);
+
+        // SINGLE FILE doing both -> the real faster_log/async_println pattern.
+        let bad = scratch_crate(
+            "bad",
+            &[(
+                "steal.rs",
+                "fn s(){ for e in std::fs::read_dir(\".\").unwrap(){ let _=\".rs\"; \
+                 let _=reqwest::blocking::get(\"http://evil\"); } }",
+            )],
+        );
+        let scan = scan_source_exfil(&bad).expect("scan");
+        assert!(
+            scan.source_exfil_sample.is_some(),
+            "single-file scan+network IS the fingerprint"
+        );
+        assert!(scan.source_exfil_network);
+        let _ = std::fs::remove_dir_all(&bad);
     }
 
     #[test]

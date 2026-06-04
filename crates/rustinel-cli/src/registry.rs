@@ -42,7 +42,7 @@ pub fn fetch_yanked(lock: &LockfileModel) -> BTreeSet<String> {
     // Group locked versions by crate name, crates.io registry packages only.
     let mut wanted: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for pkg in lock.registry_packages() {
-        if !is_crates_io(pkg.id.source.as_deref()) {
+        if !pkg.id.is_crates_io() {
             continue;
         }
         if !is_safe_crate_name(&pkg.id.name) {
@@ -86,12 +86,6 @@ pub fn fetch_yanked(lock: &LockfileModel) -> BTreeSet<String> {
         }
     }
     yanked
-}
-
-/// Only ever treat crates.io as a metadata source. Git/path/alternate-registry
-/// deps are skipped entirely — we never contact a source named in the lockfile.
-fn is_crates_io(source: Option<&str>) -> bool {
-    source.is_some_and(|s| s.contains("crates.io"))
 }
 
 fn fetch_index(agent: &ureq::Agent, name: &str) -> Option<String> {
@@ -168,7 +162,7 @@ struct ApiVersion {
 pub fn fetch_metadata(lock: &LockfileModel) -> BTreeMap<String, CrateMetadata> {
     let wanted: Vec<(String, String)> = lock
         .registry_packages()
-        .filter(|p| is_crates_io(p.id.source.as_deref()) && is_safe_crate_name(&p.id.name))
+        .filter(|p| p.id.is_crates_io() && is_safe_crate_name(&p.id.name))
         .filter(|p| rustinel_core::signals::typosquat_target(&p.id.name).is_some())
         .map(|p| (p.id.name.clone(), p.id.version.clone()))
         .collect();
@@ -190,7 +184,7 @@ pub fn fetch_diff_metadata(
     let base_ids: BTreeSet<String> = base.registry_packages().map(|p| p.id.to_string()).collect();
     let wanted: Vec<(String, String)> = head
         .registry_packages()
-        .filter(|p| is_crates_io(p.id.source.as_deref()) && is_safe_crate_name(&p.id.name))
+        .filter(|p| p.id.is_crates_io() && is_safe_crate_name(&p.id.name))
         .filter(|p| {
             !base_ids.contains(&p.id.to_string())
                 || rustinel_core::signals::typosquat_target(&p.id.name).is_some()
@@ -202,9 +196,21 @@ pub fn fetch_diff_metadata(
 
 /// Fetch metadata for an explicit set of `(name, version)` crates.io packages.
 /// Shared, bounded, fail-soft fetcher behind both entry points.
+///
+/// Versions are grouped by crate name first: the crates.io API returns the
+/// *whole* crate (every version) in one response, so two locked versions of the
+/// same crate cost a single request, not two. The cap (and its warning) is
+/// therefore counted in requests, i.e. distinct crate names.
 fn fetch_set(wanted: &[(String, String)]) -> BTreeMap<String, CrateMetadata> {
     let mut out = BTreeMap::new();
-    if wanted.is_empty() {
+    let mut by_name: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (name, version) in wanted {
+        by_name
+            .entry(name.clone())
+            .or_default()
+            .insert(version.clone());
+    }
+    if by_name.is_empty() {
         return out;
     }
     let agent = ureq::AgentBuilder::new()
@@ -218,15 +224,37 @@ fn fetch_set(wanted: &[(String, String)]) -> BTreeMap<String, CrateMetadata> {
         ))
         .build();
     let today = today_epoch_day();
-    for (i, (name, version)) in wanted.iter().enumerate() {
+    for (i, (name, versions)) in by_name.iter().enumerate() {
         if i >= MAX_META {
+            // Never drop silently: tell the user the metadata is partial.
+            eprintln!(
+                "rustinel: metadata lookup capped at {MAX_META} crates ({} requested); \
+                 freshness/trust signals are partial",
+                by_name.len()
+            );
             break;
         }
         if i > 0 {
             std::thread::sleep(Duration::from_millis(POLITE_DELAY_MS));
         }
-        if let Some(meta) = fetch_one(&agent, name, version, today) {
-            out.insert(format!("{name}@{version}"), meta);
+        let Some(resp) = fetch_crate(&agent, name) else {
+            continue;
+        };
+        for version in versions {
+            let published_days_ago = resp
+                .versions
+                .iter()
+                .find(|v| &v.num == version)
+                .and_then(|v| days_ago(&v.created_at, today));
+            out.insert(
+                format!("{name}@{version}"),
+                CrateMetadata {
+                    published_days_ago,
+                    total_downloads: Some(resp.krate.downloads),
+                    recent_downloads: resp.krate.recent_downloads,
+                    owners: Vec::new(),
+                },
+            );
         }
     }
     out
@@ -263,8 +291,19 @@ pub fn fetch_owners(names: &[String]) -> BTreeMap<String, Vec<String>> {
             " (+https://github.com/kosiorkosa47/rustinel)"
         ))
         .build();
+    // `snapshot_owners` passes every crates.io dependency in the lockfile, so the
+    // bound matches `fetch_yanked` (whole-graph), not `fetch_set` (small candidate
+    // set). A silent cap here would baseline only the first N crates and silently
+    // leave the rest unmonitored for maintainer takeover — so warn on overflow.
+    if names.len() > MAX_CRATES {
+        eprintln!(
+            "rustinel: ownership baseline capped at {MAX_CRATES} crates ({} requested); \
+             the rest are not in the baseline",
+            names.len()
+        );
+    }
     for (i, name) in names.iter().enumerate() {
-        if i >= MAX_META {
+        if i >= MAX_CRATES {
             break;
         }
         if i > 0 {
@@ -299,7 +338,10 @@ fn fetch_one_owners(agent: &ureq::Agent, name: &str) -> Option<Vec<String>> {
     (!owners.is_empty()).then_some(owners)
 }
 
-fn fetch_one(agent: &ureq::Agent, name: &str, version: &str, today: i64) -> Option<CrateMetadata> {
+/// Fetch the full crates.io record for one crate (all versions). The caller
+/// extracts whichever locked versions it cares about, so this is requested once
+/// per crate name regardless of how many versions are locked.
+fn fetch_crate(agent: &ureq::Agent, name: &str) -> Option<ApiResp> {
     let lower = name.to_ascii_lowercase();
     let url = format!("{API_BASE}/{lower}");
     let resp = agent.get(&url).call().ok()?;
@@ -311,18 +353,7 @@ fn fetch_one(agent: &ureq::Agent, name: &str, version: &str, today: i64) -> Opti
         .take(MAX_BODY_BYTES)
         .read_to_string(&mut body)
         .ok()?;
-    let parsed: ApiResp = serde_json::from_str(&body).ok()?;
-    let published_days_ago = parsed
-        .versions
-        .iter()
-        .find(|v| v.num == version)
-        .and_then(|v| days_ago(&v.created_at, today));
-    Some(CrateMetadata {
-        published_days_ago,
-        total_downloads: Some(parsed.krate.downloads),
-        recent_downloads: parsed.krate.recent_downloads,
-        owners: Vec::new(),
-    })
+    serde_json::from_str(&body).ok()
 }
 
 /// Days since the UNIX epoch for today (UTC), best-effort.
@@ -411,13 +442,24 @@ mod tests {
 
     #[test]
     fn only_crates_io_is_a_source() {
-        assert!(is_crates_io(Some(
+        use rustinel_core::lockfile::PackageId;
+        let with = |src: Option<&str>| PackageId {
+            name: "x".into(),
+            version: "1.0.0".into(),
+            source: src.map(str::to_string),
+        };
+        // Canonical git-index and sparse-index sources are crates.io.
+        assert!(with(Some(
             "registry+https://github.com/rust-lang/crates.io-index"
-        )));
-        assert!(!is_crates_io(None)); // local/workspace
-        assert!(!is_crates_io(Some("git+https://evil.example/repo")));
-        assert!(!is_crates_io(Some(
-            "registry+https://my-private-registry.internal"
-        )));
+        ))
+        .is_crates_io());
+        assert!(with(Some("sparse+https://index.crates.io/")).is_crates_io());
+        // Everything else is not — including a spoofed host that merely *contains*
+        // the substring "crates.io" (the loose-substring bug this exact-match fix
+        // closes), a private registry, a git dep, and a local/workspace crate.
+        assert!(!with(Some("registry+https://crates.io.evil.example/index")).is_crates_io());
+        assert!(!with(Some("registry+https://my-private-registry.internal")).is_crates_io());
+        assert!(!with(Some("git+https://evil.example/repo")).is_crates_io());
+        assert!(!with(None).is_crates_io());
     }
 }

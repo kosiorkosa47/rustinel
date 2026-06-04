@@ -179,8 +179,14 @@ impl Effective {
             }
         }
         if let Some(l) = &policy.licenses {
-            eff.license_allow = l.allow.clone();
-            eff.license_deny = l.deny.clone();
+            // Guard each (like the advisories branch): supplying only `allow` must
+            // NOT silently wipe the profile's default deny list (GPL/AGPL).
+            if !l.allow.is_empty() {
+                eff.license_allow = l.allow.clone();
+            }
+            if !l.deny.is_empty() {
+                eff.license_deny = l.deny.clone();
+            }
         }
         if let Some(a) = &policy.allow {
             eff.allow_crates = a.crates.clone();
@@ -295,7 +301,11 @@ pub fn evaluate(
 
         if signal.id.starts_with("advisory_") {
             let advisory_id = signal.id.trim_start_matches("advisory_");
-            if eff.adv_ignore.iter().any(|i| i == advisory_id) {
+            if eff
+                .adv_ignore
+                .iter()
+                .any(|i| i.eq_ignore_ascii_case(advisory_id))
+            {
                 warnings.push(format!(
                     "advisory {advisory_id} for `{}` is ignored by policy",
                     signal.package
@@ -304,9 +314,9 @@ pub fn evaluate(
                 continue;
             }
             let sev = signal.severity.as_str().to_string();
-            if eff.adv_fail_on.contains(&sev) && !allowlisted {
+            if eff.adv_fail_on.iter().any(|s| s.eq_ignore_ascii_case(&sev)) && !allowlisted {
                 violations.push(format!("{} ({}) on `{}`", advisory_id, sev, signal.package));
-            } else if eff.adv_warn_on.contains(&sev) || allowlisted {
+            } else if eff.adv_warn_on.iter().any(|s| s.eq_ignore_ascii_case(&sev)) || allowlisted {
                 warnings.push(format!("{} ({}) on `{}`", advisory_id, sev, signal.package));
             }
             continue;
@@ -572,7 +582,14 @@ enum LicenseVerdict {
 /// boolean semantics (so `MIT OR GPL-3.0` is fine when MIT is allowed even if
 /// GPL-3.0 is denied — you can satisfy the OR with MIT).
 fn license_verdict(expr: &str, allow: &[String], deny: &[String]) -> LicenseVerdict {
-    let contains = |list: &[String], lic: &str| list.iter().any(|x| x.eq_ignore_ascii_case(lic));
+    // Match by SPDX license *family* so the deprecated bare id (`GPL-3.0`) and the
+    // modern forms (`GPL-3.0-only`, `GPL-3.0-or-later`, `GPL-3.0+`) all match each
+    // other — otherwise a `GPL-3.0` deny entry fails open against the modern spelling.
+    let contains = |list: &[String], lic: &str| {
+        let fam = license_family(lic);
+        list.iter()
+            .any(|x| license_family(x).eq_ignore_ascii_case(fam))
+    };
 
     // Denied iff the expression cannot be satisfied while avoiding denied licenses.
     if !deny.is_empty() && !satisfiable(expr, &|lic| !contains(deny, lic)) {
@@ -584,6 +601,15 @@ fn license_verdict(expr: &str, allow: &[String], deny: &[String]) -> LicenseVerd
         return LicenseVerdict::NotAllowed;
     }
     LicenseVerdict::Ok
+}
+
+/// The SPDX license "family": the base identifier with the `+` operator and the
+/// `-only` / `-or-later` suffixes stripped, so every spelling of GPL-3.0 collapses
+/// to one key for allow/deny matching.
+fn license_family(id: &str) -> &str {
+    let id = id.strip_suffix('+').unwrap_or(id);
+    let id = id.strip_suffix("-or-later").unwrap_or(id);
+    id.strip_suffix("-only").unwrap_or(id)
 }
 
 /// True if the SPDX expression can be satisfied when each license leaf is
