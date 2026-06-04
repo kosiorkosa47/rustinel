@@ -6,6 +6,10 @@ All notable changes to rustinel are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-06-04
+
+First public release.
+
 ### Added
 
 - **`cargo rustinel check`** — static, metadata-only supply-chain risk report
