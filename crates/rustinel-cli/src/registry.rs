@@ -183,13 +183,16 @@ pub fn fetch_diff_metadata(
     base: &LockfileModel,
     head: &LockfileModel,
 ) -> BTreeMap<String, CrateMetadata> {
-    let diff = rustinel_core::diff::diff_models(base, head);
-    let added: BTreeSet<&String> = diff.added.iter().collect();
+    // Every `name@version` the head introduces — new crates *and* the new version
+    // of an upgraded crate. Computed directly from base vs head (not from the
+    // diff's `added` list, which is name-deduplicated and so excludes version
+    // bumps) so freshness is checked on upgraded versions too.
+    let base_ids: BTreeSet<String> = base.registry_packages().map(|p| p.id.to_string()).collect();
     let wanted: Vec<(String, String)> = head
         .registry_packages()
         .filter(|p| is_crates_io(p.id.source.as_deref()) && is_safe_crate_name(&p.id.name))
         .filter(|p| {
-            added.contains(&p.id.to_string())
+            !base_ids.contains(&p.id.to_string())
                 || rustinel_core::signals::typosquat_target(&p.id.name).is_some()
         })
         .map(|p| (p.id.name.clone(), p.id.version.clone()))

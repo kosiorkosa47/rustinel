@@ -1,7 +1,7 @@
 use crate::errors::RustinelError;
 use crate::lockfile::{parse_lockfile, LockfileModel};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,9 +48,15 @@ pub fn diff_models(base: &LockfileModel, head: &LockfileModel) -> LockfileDiff {
     let base_versions = versions_by_name(base);
     let head_versions = versions_by_name(head);
     let mut changed = Vec::new();
+    // Crate names whose version multiset changed (present on both sides). A
+    // version bump is a *change*, not an add plus a remove, so these names are
+    // filtered out of `added`/`removed` below — otherwise a single upgrade would
+    // be triple-listed (added new version, removed old version, changed).
+    let mut changed_names: BTreeSet<&str> = BTreeSet::new();
     for (name, head_vers) in &head_versions {
         if let Some(base_vers) = base_versions.get(name) {
             if base_vers != head_vers {
+                changed_names.insert(name.as_str());
                 changed.push(format!(
                     "{name}: {} -> {}",
                     base_vers.join("/"),
@@ -59,6 +65,9 @@ pub fn diff_models(base: &LockfileModel, head: &LockfileModel) -> LockfileDiff {
             }
         }
     }
+    let name_of = |k: &str| k.split('@').next().unwrap_or(k).to_string();
+    added.retain(|k| !changed_names.contains(name_of(k).as_str()));
+    removed.retain(|k| !changed_names.contains(name_of(k).as_str()));
 
     added.sort();
     removed.sort();
@@ -78,7 +87,15 @@ fn versions_by_name(lock: &LockfileModel) -> BTreeMap<String, Vec<String>> {
             .push(p.id.version.clone());
     }
     for v in map.values_mut() {
-        v.sort();
+        // Semver-aware order for display (so 1.0.2 sorts before 1.0.10), with a
+        // lexical fallback for any non-semver token. The multiset equality check
+        // is order-independent across both sides, so this affects display only.
+        v.sort_by(
+            |a, b| match (semver::Version::parse(a), semver::Version::parse(b)) {
+                (Ok(va), Ok(vb)) => va.cmp(&vb),
+                _ => a.cmp(b),
+            },
+        );
     }
     map
 }
@@ -121,5 +138,53 @@ mod tests {
         let d = diff_models(&base, &head);
         assert_eq!(d.changed.len(), 1);
         assert!(d.changed[0].contains("1.0.0 -> 1.0.1"));
+    }
+
+    fn pkg(name: &str, ver: &str) -> String {
+        format!(
+            "[[package]]\nname = \"{name}\"\nversion = \"{ver}\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n\n"
+        )
+    }
+
+    #[test]
+    fn version_bump_is_only_changed_not_added_or_removed() {
+        // The canonical PR event: a single upgrade must land in `changed` only,
+        // never simultaneously in added (new version) and removed (old version).
+        let base = parse_lockfile_str(PathBuf::from("base"), &pkg("serde", "1.0.0")).unwrap();
+        let head = parse_lockfile_str(PathBuf::from("head"), &pkg("serde", "1.0.1")).unwrap();
+        let d = diff_models(&base, &head);
+        assert_eq!(d.changed.len(), 1);
+        assert!(
+            d.added.is_empty(),
+            "upgrade leaked into added: {:?}",
+            d.added
+        );
+        assert!(
+            d.removed.is_empty(),
+            "upgrade leaked into removed: {:?}",
+            d.removed
+        );
+    }
+
+    #[test]
+    fn changed_versions_display_in_semver_order() {
+        // 1.0.2 must sort before 1.0.10 in the display string (semver, not lexical).
+        let base = parse_lockfile_str(
+            PathBuf::from("base"),
+            &format!("{}{}", pkg("foo", "1.0.2"), pkg("foo", "1.0.10")),
+        )
+        .unwrap();
+        let head = parse_lockfile_str(
+            PathBuf::from("head"),
+            &format!("{}{}", pkg("foo", "1.0.2"), pkg("foo", "1.0.11")),
+        )
+        .unwrap();
+        let d = diff_models(&base, &head);
+        assert_eq!(d.changed.len(), 1);
+        assert!(
+            d.changed[0].contains("1.0.2/1.0.10"),
+            "versions not in semver order: {}",
+            d.changed[0]
+        );
     }
 }
