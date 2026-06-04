@@ -60,6 +60,29 @@ depend on your cache and how recently you ran `cargo rustinel advisory update`.
 
 ---
 
+## Pre-CVE — the famous attacks an advisory scanner misses
+
+`cargo audit` can only flag what already has an advisory. The most consequential
+supply-chain attacks did their damage in the window *before* disclosure. rustinel
+reconstructs each as a deterministic test
+([`tests/proactive_attacks.rs`](../crates/rustinel-core/tests/proactive_attacks.rs))
+and flags the structural precursor — statically, offline, before any CVE:
+
+| Real attack | What rustinel catches | Signal |
+|---|---|---|
+| **xz / liblzma** (CVE-2024-3094) | a new co-maintainer on an established crate | `owners_changed` |
+| **event-stream** (2018) | a new owner + a freshly added dependency | `owners_changed` + `freshly_published` |
+| **faster_log / async_println** (Sept 2025) | a `*.workers.dev` exfil endpoint in source | `suspicious_exfil_domain` |
+| **rustdecimal** (2022) | env-gated download-and-execute | `env_gated_payload` |
+| **dependency confusion** | a trusted name from a non-crates.io source | `source_substitution` |
+
+An advisory scanner reports **none** of these in the pre-disclosure window, and a
+build-time sandbox misses the runtime ones (faster_log's payload never runs at
+build time). See [`docs/PROACTIVE-DETECTION.md`](../docs/PROACTIVE-DETECTION.md)
+for the full case, honest framing, and the live `cargo audit` cross-check.
+
+---
+
 ## 1. The headline: a pull request that *adds* supply-chain risk
 
 rustinel's niche is the **diff**. The base branch depends on `serde`; the PR
