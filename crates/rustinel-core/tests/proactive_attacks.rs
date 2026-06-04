@@ -165,3 +165,26 @@ fn rustdecimal_env_gated_payload_flagged_statically() {
         "the env-gated download-and-execute must be flagged",
     );
 }
+
+/// **Dependency confusion / source substitution.** A trusted crate name (`serde`)
+/// resolves from a non-crates.io source — here an attacker-controlled git fork
+/// instead of crates.io. rustinel flags it; `cargo audit`, which only matches
+/// crates.io packages, is blind to it entirely.
+#[test]
+fn dependency_confusion_popular_name_from_non_crates_io_flagged() {
+    let lock = fixtures().join("attacks/dependency-confusion/Cargo.lock");
+    let options = AnalysisOptions {
+        offline: true,
+        advisory_db_path: Some(PathBuf::from("/nonexistent-rustinel-proactive-test-db")),
+        ..Default::default()
+    };
+    let report = analyze_lockfile(&lock, options).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.id == "source_substitution" && f.package == "serde@1.0.219"),
+        "a popular crate name from a non-crates.io source must be flagged",
+    );
+}

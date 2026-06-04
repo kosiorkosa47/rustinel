@@ -1,0 +1,14 @@
+# Dependency-confusion / source-substitution: a trusted crate name (`serde`)
+# resolving from a non-crates.io source (an attacker-controlled git fork) instead
+# of crates.io. cargo-audit only matches crates.io packages and is blind to this.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["serde"]
+
+[[package]]
+name = "serde"
+version = "1.0.219"
+source = "git+https://github.com/attacker/serde-fork#0000000000000000000000000000000000000000"

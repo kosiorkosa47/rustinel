@@ -76,6 +76,7 @@ pub fn collect_basic_signals(
     collect_multiple_versions(lock, &mut signals);
     collect_name_heuristics(lock, &mut signals);
     collect_typosquat(lock, options, &mut signals);
+    collect_source_substitution(lock, &mut signals);
     collect_freshness(lock, options, &mut signals);
     collect_owners_changed(lock, options, &mut signals);
     collect_yanked(lock, options, &mut signals);
@@ -174,6 +175,44 @@ fn collect_owners_changed(
             )],
             recommendation:
                 "Verify the ownership change is legitimate, then refresh the baseline with `cargo rustinel trust`."
+                    .into(),
+        });
+    }
+}
+
+/// Flag a *popular* crate name that resolves from a non-crates.io source. A
+/// `serde` or `tokio` pulled from a git fork or a private / alternate registry is
+/// sometimes an intended patch — but it is also the dependency-confusion /
+/// source-substitution vector, where an attacker shadows a trusted name with
+/// their own build. cargo-audit, which only matches crates.io packages, is blind
+/// to it entirely.
+fn collect_source_substitution(lock: &LockfileModel, signals: &mut Vec<RiskSignal>) {
+    for package in lock.registry_packages() {
+        let name = package.id.name.as_str();
+        if !POPULAR_CRATES.contains(&name) {
+            continue;
+        }
+        if package.id.is_crates_io() {
+            continue;
+        }
+        let source = package.id.source.as_deref().unwrap_or("an unknown source");
+        signals.push(RiskSignal {
+            id: "source_substitution".into(),
+            package: package.id.to_string(),
+            severity: Severity::Medium,
+            weight: 18,
+            confidence: 0.7,
+            evidence: vec![Evidence::new(
+                "source",
+                format!(
+                    "the popular crate `{name}` resolves from a non-crates.io source ({source}) — \
+                     verify this is an intended fork or mirror, not a dependency-confusion substitution"
+                ),
+            )],
+            recommendation:
+                "Confirm why a well-known crate name comes from a non-crates.io source. If it is \
+                 not an intentional patch, this is the dependency-confusion vector — pin the \
+                 crates.io source."
                     .into(),
         });
     }
