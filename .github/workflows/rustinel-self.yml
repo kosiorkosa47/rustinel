@@ -1,0 +1,54 @@
+# Dogfood: rustinel reviews its own supply chain on every pull request and posts
+# the same sticky comment it produces for consumers. Informational — it never
+# fails the build on its own risk decision (that is the consumer's choice via the
+# `fail-on-review-required` input of the published action).
+name: rustinel (self)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build cargo-rustinel
+        run: cargo build --release -p cargo-rustinel
+
+      - name: Sync the RustSec advisory database
+        run: ./target/release/cargo-rustinel rustinel advisory update || true
+
+      - name: Review supply-chain risk
+        run: |
+          ./target/release/cargo-rustinel rustinel check \
+            --lockfile Cargo.lock \
+            --format markdown --output rustinel-report.md --no-timestamp || true
+
+      - name: Post sticky PR comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MARKER="<!-- rustinel-report -->"
+          BODY="$(printf '%s\n%s\n' "$MARKER" "$(cat rustinel-report.md)")"
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          EXISTING="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "map(select(.body | startswith(\"$MARKER\"))) | .[0].id // empty")"
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" >/dev/null
+            echo "Updated existing rustinel comment ($EXISTING)."
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" >/dev/null
+            echo "Posted new rustinel comment."
+          fi
+
+      - name: Surface report in the job log
+        run: cat rustinel-report.md || true
