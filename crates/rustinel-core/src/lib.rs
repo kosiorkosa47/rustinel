@@ -93,28 +93,27 @@ impl AnalysisOptions {
     }
 
     fn load_advisories(&self) -> Result<advisory::AdvisoryDb, RustinelError> {
-        if let Some(path) = &self.advisory_db_path {
-            let result = advisory::AdvisoryDb::load_from_dir(path);
-            // `--offline` must never hard-fail (documented invariant): degrade an
-            // unreadable explicit DB to an empty one rather than erroring.
-            return if self.offline {
-                Ok(result.unwrap_or_else(|_| advisory::AdvisoryDb::empty()))
-            } else {
-                result
-            };
-        }
-        if self.offline {
-            // Offline with no explicit DB: use the default cache if it happens to
-            // exist, otherwise an empty DB. Never fails on absence.
-            if let Some(dir) = advisory::AdvisoryDb::default_cache_dir() {
-                return advisory::AdvisoryDb::load_from_dir(&dir);
-            }
+        // Resolve which directory to read: an explicit path wins, otherwise the
+        // default cache. Absent entirely (no explicit path, no resolvable cache
+        // dir) → an empty DB. Online refresh is out of scope for core; we read
+        // whatever is already cached on disk.
+        let Some(dir) = self
+            .advisory_db_path
+            .clone()
+            .or_else(advisory::AdvisoryDb::default_cache_dir)
+        else {
             return Ok(advisory::AdvisoryDb::empty());
-        }
-        // Online refresh is out of scope for core; we read whatever is cached.
-        match advisory::AdvisoryDb::default_cache_dir() {
-            Some(dir) => advisory::AdvisoryDb::load_from_dir(&dir),
-            None => Ok(advisory::AdvisoryDb::empty()),
+        };
+        let result = advisory::AdvisoryDb::load_from_dir(&dir);
+        // `--offline` must never hard-fail (documented invariant): an unreadable
+        // DB — explicit OR default cache (e.g. a permission-denied directory, or
+        // a file where a directory is expected) — degrades to an empty DB rather
+        // than erroring. A single shared path keeps the two offline cases from
+        // ever drifting apart.
+        if self.offline {
+            Ok(result.unwrap_or_else(|_| advisory::AdvisoryDb::empty()))
+        } else {
+            result
         }
     }
 }
@@ -250,8 +249,12 @@ mod tests {
 
     #[test]
     fn offline_with_unreadable_explicit_db_does_not_fail() {
-        // An explicit advisory-db path that exists but is not a readable directory
-        // must degrade to an empty DB under --offline, never hard-fail (invariant).
+        // An advisory-db path that exists but is not a readable directory (here a
+        // regular file → `read_dir` errors with ENOTDIR, the same failure a
+        // permission-denied dir produces) must degrade to an empty DB under
+        // --offline, never hard-fail (documented invariant). Since the explicit
+        // and default-cache offline branches now share one degrade path in
+        // `load_advisories`, this also guards the default-cache case.
         let file = std::env::temp_dir().join("rustinel_not_a_dir_marker.txt");
         std::fs::write(&file, b"x").unwrap();
         let lock = fixtures().join("safe_project/Cargo.lock");

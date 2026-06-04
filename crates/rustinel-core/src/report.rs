@@ -332,13 +332,12 @@ pub fn to_markdown(report: &SentinelReport) -> String {
         out.push('\n');
     }
 
-    // Suggested actions: unique recommendations from shown findings.
+    // Suggested actions: unique recommendations from the findings shown above —
+    // the same `take(10)` advisory and signal sets. Deriving from the shown sets
+    // (not all findings) guarantees an action never references a finding the
+    // comment never displayed, in the rare case a group is truncated past 10.
     let mut actions: Vec<String> = Vec::new();
-    for f in report
-        .findings
-        .iter()
-        .filter(|f| f.severity > Severity::Info)
-    {
+    for f in advisories.iter().take(10).chain(signals.iter().take(10)) {
         let rec = f.recommendation.trim();
         if !rec.is_empty() && !actions.iter().any(|a| a == rec) {
             actions.push(rec.to_string());
