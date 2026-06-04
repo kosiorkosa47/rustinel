@@ -17,10 +17,13 @@
 `cargo audit` tells you *whether* you have a vulnerability.
 **`rustinel` tells you how a pull request changes your supply-chain risk — and why.**
 
-It catches what advisory scanners miss: **typosquats**, **build scripts that
-phone home**, and **dependencies that read your source and exfiltrate secrets**
-— the exact class of the September 2025 `faster_log`/`async_println` crypto-stealers.
-Static, offline-first, and emits compliance-grade **SBOM + VEX**.
+It catches what advisory scanners miss — **before any CVE exists**: a **new
+maintainer** taking over a trusted dependency (the xz / event-stream vector),
+**freshly published** versions, **typosquats**, **build scripts that phone home**,
+and **dependencies that exfiltrate secrets** — the exact class of the September
+2025 `faster_log`/`async_println` crypto-stealers. Static, offline-first, and
+emits compliance-grade **SBOM + VEX**.
+→ **[What `cargo audit` structurally cannot see](docs/PROACTIVE-DETECTION.md)**
 
 <p align="center">
   <img src="assets/demo.gif" width="820" alt="rustinel checking the real 292-package Alacritty dependency tree: it matches the same advisory as cargo-audit (bytes RUSTSEC-2026-0007) and additionally flags a typosquat (miow, one edit from mio) that an advisory-only scanner cannot see">
