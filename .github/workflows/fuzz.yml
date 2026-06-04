@@ -21,13 +21,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [lockfile, policy, unsafe_scan, build_intent, advisory, spdx]
+        target: [lockfile, policy, unsafe_scan, build_intent, advisory, spdx, typosquat]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # NOT --locked: cargo-fuzz's pinned lockfile drags in an old `rustix`
+        # that fails to compile on current nightly rustc ("rustc_layout_scalar_
+        # valid_range_* are reserved"). Resolving fresh picks a compatible rustix.
+        run: cargo install cargo-fuzz
       - name: Seed corpus
         run: |
           cd crates/rustinel-core

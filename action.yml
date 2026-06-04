@@ -53,13 +53,30 @@ runs:
   steps:
     - name: Install rustinel
       shell: bash
-      run: cargo install cargo-rustinel --locked || cargo install --path crates/rustinel-cli --locked
+      run: |
+        set -e
+        if command -v cargo-rustinel >/dev/null 2>&1; then exit 0; fi
+        # 1. Published crate — fast once cargo-rustinel is on crates.io.
+        if cargo install cargo-rustinel --locked; then exit 0; fi
+        # 2. Build from this repository at the exact ref the action was invoked
+        #    with (e.g. `@v1`), so an external consumer is fully self-contained —
+        #    no crates.io and no `crates/rustinel-cli` in *their* checkout needed.
+        REF="${{ github.action_ref }}"
+        cargo install --git https://github.com/kosiorkosa47/rustinel \
+          ${REF:+--rev "$REF"} cargo-rustinel --locked
 
     - name: Run rustinel
       id: run
       shell: bash
       run: |
         set +e
+        # Fail fast with a clear message instead of letting clap exit 2 on empty
+        # paths (which would post an empty PR comment and look like a policy fail).
+        if [ "${{ inputs.command }}" = "diff" ] \
+           && { [ -z "${{ inputs.base-lockfile }}" ] || [ -z "${{ inputs.head-lockfile }}" ]; }; then
+          echo "::error::rustinel: 'diff' requires both 'base-lockfile' and 'head-lockfile' inputs."
+          exit 1
+        fi
         ARGS=(rustinel "${{ inputs.command }}")
         if [ "${{ inputs.command }}" = "diff" ]; then
           ARGS+=(--base-lockfile "${{ inputs.base-lockfile }}" --head-lockfile "${{ inputs.head-lockfile }}")
