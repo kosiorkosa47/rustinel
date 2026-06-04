@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/rustinel/rustinel-report.schema.json",
+  "$id": "https://raw.githubusercontent.com/kosiorkosa47/rustinel/main/schemas/rustinel-report.schema.json",
   "title": "rustinel report",
   "type": "object",
   "required": [

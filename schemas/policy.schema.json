@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/rustinel/policy.schema.json",
+  "$id": "https://raw.githubusercontent.com/kosiorkosa47/rustinel/main/schemas/policy.schema.json",
   "title": "rustinel policy",
   "type": "object",
   "properties": {

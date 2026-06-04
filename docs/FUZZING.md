@@ -30,7 +30,7 @@ edge-case-prone code:
 ```bash
 # On a fresh Amazon Linux / Ubuntu box with rustup:
 git clone <repo> && cd rustinel
-TOTAL_SECONDS=14400 scripts/fuzz-aws.sh      # ~4h, split across the 6 targets
+TOTAL_SECONDS=14400 scripts/fuzz-aws.sh      # ~4h, split across the 7 targets
 ```
 
 The script installs nightly + cargo-fuzz, **seeds the corpus** from real

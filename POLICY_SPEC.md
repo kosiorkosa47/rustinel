@@ -2,76 +2,96 @@
 
 ## 1. Purpose
 
-The `rustinel.toml` file lets an organization define dependency risk policy.
+The `rustinel.toml` file lets an organization define dependency risk policy. It
+is consumed by `cargo rustinel check`/`diff`/`export` via `--policy`, and a
+starter file is produced by `cargo rustinel policy init --profile <name>`.
 
 ## 2. Full example
 
+Every key below is consumed by the current parser; this example parses cleanly
+and copy-pastes as-is.
+
 ```toml
+# Optional schema version (reserved for forward compatibility).
+version = 1
+
 [profile]
 name = "balanced"
 
 [risk]
 max_project_score = 70
-max_package_score = 80
-fail_on_delta_above = 30
+max_package_score = 85
+fail_on_delta_above = 35
 warn_on_delta_above = 10
 
 [advisories]
 fail_on = ["critical", "high"]
 warn_on = ["medium", "low"]
-ignore = ["RUSTSEC-YYYY-NNNN"]
+ignore = ["RUSTSEC-2020-0000"]
 
 [signals]
 fail_on_yanked = true
-warn_on_build_rs = true
+warn_on_build_rs = false
 require_review_on_build_rs = false
 require_review_on_native_ffi = true
-warn_on_unsafe_increase = true
 fail_on_denied_license = true
 warn_on_unknown_license = true
+fail_on_unknown_license = false
 
 [licenses]
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC"]
 deny = ["GPL-3.0", "AGPL-3.0"]
 
+# Allowlisted crates: their signals still appear in the report, but they no
+# longer drive the policy decision (see §5).
 [allow]
 crates = ["serde", "serde_json", "tokio"]
-advisories = []
 
 [deny]
 crates = []
-
-[review]
-owners = ["@security-team"]
-require_for_signals = ["native_ffi_detected", "build_script_present"]
 ```
+
+Unknown keys are accepted and ignored (forward compatibility); they do **not**
+change behavior, so do not rely on a key that is not listed above.
 
 ## 3. Default profiles
 
+Selected with `--policy` pointing at a file whose `[profile] name = "…"` is one
+of the below, or with `policy init --profile <name>`. Values are the defaults
+each profile applies; an explicit key in the file overrides the profile.
+
 ### permissive
 
-- blocks only critical advisories and denied licenses,
-- warns about high advisories,
-- does not block `build.rs` or FFI.
+- fails only on **critical** advisories; warns on high/medium/low,
+- does **not** fail on yanked crates,
+- denies only `AGPL-3.0`,
+- does not require review for native/FFI,
+- `max_project_score = 90`, `max_package_score = 95`.
 
-### balanced
+### balanced (default)
 
-- blocks critical/high advisories,
-- blocks yanked,
-- warns about `build.rs`, unsafe increase, unknown license,
-- requires review for native/FFI.
+- fails on **critical** and **high** advisories; warns on medium/low,
+- fails on yanked crates and denied licenses (`GPL-3.0`, `AGPL-3.0`),
+- requires review for native/FFI,
+- warns on unknown licenses (does not fail),
+- `max_project_score = 70`, `max_package_score = 85`.
 
 ### strict
 
-- blocks critical/high advisories,
-- blocks medium advisories if a patch exists,
-- blocks yanked and unmaintained advisories,
-- requires review for `build.rs`, FFI, high unsafe density,
-- blocks unknown license.
+- fails on **critical**, **high**, and **medium** advisories; warns on low,
+- fails on yanked crates,
+- requires review for `build.rs` **and** native/FFI,
+- **fails** on unknown licenses,
+- `max_project_score = 50`, `max_package_score = 70`.
+
+In every profile the proactive malware-class signals (suspicious source exfil,
+exfil-domain, env-gated payload, typosquat, ownership change, source
+substitution, denied crate) demand review by default and **fail** under
+`strict`.
 
 ## 4. Decision model
 
-Policy result:
+A policy evaluation produces one decision:
 
 ```text
 PASS
@@ -80,41 +100,46 @@ FAIL
 REVIEW_REQUIRED
 ```
 
-`REVIEW_REQUIRED` may be treated as a fail in CI if `--fail-on-review-required`.
+`REVIEW_REQUIRED` is treated as a failure in CI when `--fail-on-review-required`
+is passed (the process then exits non-zero).
 
-## 5. Allowlist
+## 5. Allowlisting a crate
 
-An allowlist should not remove signals from the report. It should change the policy decision.
-
-Example:
+An allowlist does not remove a crate's signals from the report — they still
+appear — it removes that crate's findings from the **policy decision**, so a
+reviewed-and-accepted dependency stops blocking CI.
 
 ```toml
-[allow.crates]
-"openssl-sys" = { reason = "approved by security team", expires = "2026-12-31" }
+[allow]
+crates = ["openssl-sys"]
 ```
-
-If an allowlist entry has expired, the tool should warn or fail.
 
 ## 6. Ignoring an advisory
 
-Require a reason.
+List the advisory id under `[advisories]`. An ignored advisory is recorded in
+the report's `ignored_advisories` and does not drive the decision.
 
 ```toml
-[advisories.ignore]
-"RUSTSEC-2020-0000" = { reason = "not reachable in our build", expires = "2026-06-30" }
+[advisories]
+ignore = ["RUSTSEC-2020-0000"]
 ```
-
-Without a `reason`, policy validation should return a warning or an error in strict mode.
 
 ## 7. Schema evolution
 
-Policy should have a `version`.
+A policy file may carry a `version` for forward compatibility:
 
 ```toml
 version = 1
 ```
 
-For unknown fields:
+Unknown fields are currently accepted and ignored rather than rejected.
 
-- MVP: warn,
-- strict config mode: error.
+## 8. Planned (not yet enforced)
+
+The following are design intentions, **not** implemented today. They are listed
+so the file format can grow without breaking existing policies; do not rely on
+them yet:
+
+- per-entry allow/ignore metadata (`reason`, `expires`) with expiry warnings,
+- a `[review]` section mapping signals to required reviewers/owners,
+- a strict "unknown field is an error" mode.
