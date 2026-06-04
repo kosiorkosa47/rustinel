@@ -31,7 +31,7 @@ jobs:
           base-lockfile: base.Cargo.lock
           head-lockfile: Cargo.lock
           policy: rustinel.toml
-          online-metadata: "true" # detect yanked versions via crates.io
+          online-metadata: "true" # crates.io metadata: yanked, freshness, owners, typosquat
           # comment: "true"        # (default) post/update a sticky PR comment
           # fail-on-review-required: "true"
 

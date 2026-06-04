@@ -27,7 +27,7 @@ inputs:
     required: false
     default: "false"
   online-metadata:
-    description: Query the crates.io sparse index for yanked versions
+    description: Query crates.io for yanked versions, publish dates, owners and download counts (powers freshness / ownership-change / typosquat signals)
     required: false
     default: "false"
   fail-on-review-required:

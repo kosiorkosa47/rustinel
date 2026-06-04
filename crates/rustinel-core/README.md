@@ -14,8 +14,10 @@ The signals come in two kinds:
 - **Proactive** — risk that exists *before* any advisory is filed: a crate's
   **maintainer/ownership change** (the xz / event-stream takeover vector), a
   **freshly published** version ("new == unreviewed"), **typosquatting**, a
-  **data-exfiltration domain** hard-coded in the source (the faster_log
-  crypto-stealer, Sept 2025), and `build.rs` network / payload intent. See
+  **data-exfiltration domain** or **env-gated download-and-execute** in the
+  source (the faster_log and rustdecimal crypto-stealers), a trusted name from a
+  **non-crates.io source** (dependency confusion), and `build.rs` network /
+  payload intent. See
   [`docs/PROACTIVE-DETECTION.md`](https://github.com/kosiorkosa47/rustinel/blob/main/docs/PROACTIVE-DETECTION.md).
 
 Plus native FFI, `unsafe` usage, license, yanked and duplicate-version signals.

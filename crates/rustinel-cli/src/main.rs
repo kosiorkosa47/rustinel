@@ -56,7 +56,8 @@ enum Commands {
         #[arg(long)]
         advisory_db: Option<PathBuf>,
 
-        /// Query the crates.io sparse index for yanked versions (network).
+        /// Query crates.io for yanked versions, publish dates, owners and download
+        /// counts — powers the freshness, ownership-change and typosquat signals (network).
         #[arg(long)]
         online_metadata: bool,
 
@@ -98,6 +99,8 @@ enum Commands {
         #[arg(long)]
         advisory_db: Option<PathBuf>,
 
+        /// Query crates.io for yanked versions, publish dates, owners and download
+        /// counts — powers the freshness, ownership-change and typosquat signals (network).
         #[arg(long)]
         online_metadata: bool,
 
@@ -162,6 +165,8 @@ enum Commands {
         #[arg(long)]
         advisory_db: Option<PathBuf>,
 
+        /// Query crates.io for yanked versions, publish dates, owners and download
+        /// counts — powers the freshness, ownership-change and typosquat signals (network).
         #[arg(long)]
         online_metadata: bool,
 
