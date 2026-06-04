@@ -1,0 +1,5 @@
+[package]
+name = "legit-api-client"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture: a benign HTTP client. rustinel must NOT flag it."

@@ -188,3 +188,34 @@ fn dependency_confusion_popular_name_from_non_crates_io_flagged() {
         "a popular crate name from a non-crates.io source must be flagged",
     );
 }
+
+/// Low-false-positive guard: an ordinary HTTP client (network + env config, no
+/// malicious conjunction) must trip NONE of the proactive malice signals. A
+/// security tool that cries wolf on normal code is worse than useless, so this
+/// is the regression guard that keeps the heuristics honest.
+#[test]
+fn benign_http_client_trips_no_malice_signals() {
+    let lock = fixtures().join("attacks/benign/Cargo.lock");
+    let options = AnalysisOptions {
+        offline: true,
+        advisory_db_path: Some(PathBuf::from("/nonexistent-rustinel-proactive-test-db")),
+        source_path: Some(fixtures().join("mock_registry")),
+        ..Default::default()
+    };
+    let report = analyze_lockfile(&lock, options).unwrap();
+
+    for id in [
+        "suspicious_exfil_domain",
+        "env_gated_payload",
+        "suspicious_source_exfil",
+        "source_substitution",
+    ] {
+        assert!(
+            !report
+                .findings
+                .iter()
+                .any(|f| f.id == id && f.package == "legit-api-client@0.1.0"),
+            "benign crate must not trip `{id}`",
+        );
+    }
+}

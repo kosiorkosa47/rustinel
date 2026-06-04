@@ -1,0 +1,15 @@
+# Negative control: an ordinary dependency that exercises network + env config
+# but none of the malicious conjunctions. rustinel must flag none of the
+# proactive malice signals on it.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["legit-api-client"]
+
+[[package]]
+name = "legit-api-client"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
