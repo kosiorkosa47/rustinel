@@ -291,7 +291,25 @@ fn comparator_matches_bare(c: &Comparator, v: &Version) -> bool {
         Op::GreaterEq => *v >= base,
         Op::Less => *v < base,
         Op::LessEq => *v <= base,
-        Op::Exact => *v == base,
+        // Exact comparators are partial-aware: `=1.2` means any `1.2.x`, `=1`
+        // means any `1.x.y` — matching semver's own `=` family semantics, here
+        // applied with bare prerelease ordering like the other arms. (Naive
+        // `*v == base` would zero-fill `=1.2` to `1.2.0` and miss `1.2.5-rc.1`.)
+        Op::Exact => {
+            if v.major != c.major {
+                return false;
+            }
+            let Some(minor) = c.minor else {
+                return true;
+            };
+            if v.minor != minor {
+                return false;
+            }
+            let Some(patch) = c.patch else {
+                return true;
+            };
+            v.patch == patch && v.pre == c.pre
+        }
         // Caret (`^0.6.4`) appears in backport-patched ranges; expand to its
         // `[base, upper)` interval and compare with bare ordering.
         Op::Caret => *v >= base && *v < caret_upper(c),
@@ -606,6 +624,28 @@ mod tests {
     }
 
     #[test]
+    fn partial_exact_bound_covers_prereleases() {
+        // `=1.2` means "any 1.2.x". Before the fix it zero-filled to `1.2.0`, so a
+        // prerelease of that line was wrongly reported as affected (false positive).
+        let a = adv(&[], &["= 1.2"]);
+        assert!(
+            !a.affects(&Version::parse("1.2.5-rc.1").unwrap()),
+            "=1.2 must cover 1.2.5-rc.1"
+        );
+        assert!(
+            a.affects(&Version::parse("1.3.0-rc.1").unwrap()),
+            "=1.2 must not cover 1.3.0-rc.1"
+        );
+        // `=1` means "any 1.x.y".
+        let b = adv(&[], &["= 1"]);
+        assert!(!b.affects(&Version::parse("1.7.0-rc.1").unwrap()));
+        assert!(b.affects(&Version::parse("2.0.0-rc.1").unwrap()));
+        // A full `=1.2.3` still excludes the prerelease of that exact version.
+        let c = adv(&[], &["= 1.2.3"]);
+        assert!(c.affects(&Version::parse("1.2.3-rc.1").unwrap()));
+    }
+
+    #[test]
     fn prerelease_in_affected_range_still_flags() {
         // No false negative: a prerelease genuinely inside the affected window
         // (unaffected `< 0.1.0`, patched `>= 0.3.0`) is still reported.
@@ -641,7 +681,6 @@ mod tests {
             },
             checksum: None,
             dependencies: vec![],
-            lockfile_line: None,
         };
         let lock = LockfileModel {
             path: "Cargo.lock".into(),

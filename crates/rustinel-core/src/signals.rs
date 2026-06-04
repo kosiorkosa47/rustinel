@@ -1716,7 +1716,6 @@ mod tests {
             },
             checksum: None,
             dependencies: vec![],
-            lockfile_line: None,
         }
     }
 

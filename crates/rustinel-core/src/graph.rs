@@ -85,7 +85,6 @@ mod tests {
             },
             checksum: None,
             dependencies: deps.iter().map(|s| s.to_string()).collect(),
-            lockfile_line: None,
         }
     }
 

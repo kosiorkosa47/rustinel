@@ -103,7 +103,8 @@ pub fn render(
     serde_json::to_string_pretty(&value)
 }
 
-/// Components in deterministic order: registry deps + the local root component.
+/// Registry dependencies in deterministic order (the local root is handled
+/// separately by each exporter, e.g. CycloneDX `metadata.component` / SPDX root).
 fn sorted_components(lock: &LockfileModel) -> Vec<&Package> {
     let mut comps: Vec<&Package> = lock.registry_packages().collect();
     comps.sort_by(|a, b| a.id.cmp(&b.id));
@@ -201,14 +202,33 @@ pub fn spdx(lock: &LockfileModel, report: &SentinelReport) -> Value {
         .clone()
         .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
 
-    let root_name = root_component(lock)
+    let root = root_component(lock);
+    let root_name = root
         .map(|p| p.id.name.clone())
         .unwrap_or_else(|| "rustinel-scan-target".to_string());
 
     let licenses = license_map(report);
     let comps = sorted_components(lock);
-    let mut packages = Vec::with_capacity(comps.len());
+    let mut packages = Vec::with_capacity(comps.len() + 1);
     let mut relationships = Vec::new();
+
+    // The analyzed project (local root), when present, is the document's primary
+    // subject: DOCUMENT DESCRIBES it, and it DEPENDS_ON each resolved dependency.
+    const ROOT_ID: &str = "SPDXRef-Package-root";
+    if let Some(rp) = root {
+        packages.push(json!({
+            "name": rp.id.name,
+            "SPDXID": ROOT_ID,
+            "versionInfo": rp.id.version,
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+        }));
+        relationships.push(json!({
+            "spdxElementId": "SPDXRef-DOCUMENT",
+            "relatedSpdxElement": ROOT_ID,
+            "relationshipType": "DESCRIBES",
+        }));
+    }
 
     for (i, p) in comps.iter().enumerate() {
         let spdx_id = format!("SPDXRef-Package-{i}");
@@ -234,11 +254,21 @@ pub fn spdx(lock: &LockfileModel, report: &SentinelReport) -> Value {
             entry["checksums"] = json!([{ "algorithm": "SHA256", "checksumValue": sum }]);
         }
         packages.push(entry);
-        relationships.push(json!({
-            "spdxElementId": "SPDXRef-DOCUMENT",
-            "relatedSpdxElement": spdx_id,
-            "relationshipType": "DESCRIBES",
-        }));
+        // With a root present, dependencies hang off it (DEPENDS_ON); without one
+        // (a lockfile-only scan) the document describes each dependency directly.
+        if root.is_some() {
+            relationships.push(json!({
+                "spdxElementId": ROOT_ID,
+                "relatedSpdxElement": spdx_id,
+                "relationshipType": "DEPENDS_ON",
+            }));
+        } else {
+            relationships.push(json!({
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relatedSpdxElement": spdx_id,
+                "relationshipType": "DESCRIBES",
+            }));
+        }
     }
 
     json!({
@@ -246,7 +276,12 @@ pub fn spdx(lock: &LockfileModel, report: &SentinelReport) -> Value {
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": format!("{root_name}-sbom"),
-        "documentNamespace": format!("https://rustinel.dev/spdx/{root_name}"),
+        // Unique per document (SPDX 2.3 MUST): a deterministic content fingerprint
+        // distinguishes distinct package sets and avoids the rootless-scan collision.
+        "documentNamespace": format!(
+            "https://rustinel.dev/spdx/{root_name}/{}",
+            content_fingerprint(&comps)
+        ),
         "creationInfo": {
             "created": created,
             "creators": [ format!("Tool: {TOOL}-{}", tool_version()) ],
@@ -257,9 +292,36 @@ pub fn spdx(lock: &LockfileModel, report: &SentinelReport) -> Value {
     })
 }
 
+/// Deterministic content fingerprint of the component set (FNV-1a over the sorted
+/// `name@version:checksum` list). Stable for identical input, differs across
+/// package sets — makes the SPDX documentNamespace unique without a clock/random.
+fn content_fingerprint(comps: &[&Package]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut feed = |s: &str| {
+        for b in s.bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    for p in comps {
+        feed(&p.id.to_string());
+        feed(":");
+        feed(p.checksum.as_deref().unwrap_or(""));
+        feed("\n");
+    }
+    format!("{h:016x}")
+}
+
 // --- OSV (osv.dev schema) ----------------------------------------------------
 
 pub fn osv(_lock: &LockfileModel, report: &SentinelReport) -> Value {
+    // OSV requires `modified`; keep it deterministic (the analysis timestamp, or a
+    // fixed epoch when timestamps are suppressed for byte-identical output).
+    let modified = report
+        .analysis
+        .generated_at
+        .clone()
+        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string());
     let records: Vec<Value> = advisory_findings(report)
         .iter()
         .map(|f| {
@@ -268,6 +330,7 @@ pub fn osv(_lock: &LockfileModel, report: &SentinelReport) -> Value {
             json!({
                 "schema_version": "1.6.0",
                 "id": advisory_id(f),
+                "modified": modified,
                 "summary": finding_summary(f),
                 "affected": [ {
                     "package": {
@@ -280,7 +343,10 @@ pub fn osv(_lock: &LockfileModel, report: &SentinelReport) -> Value {
             })
         })
         .collect();
-    json!({ "results": records })
+    // A JSON array of OSV vulnerability records, each a valid osv.dev object — not
+    // a non-standard `{ "results": [...] }` envelope (which is neither the OSV
+    // vulnerability schema nor the OSV-Scanner results shape).
+    Value::Array(records)
 }
 
 // --- OpenVEX -----------------------------------------------------------------
@@ -304,12 +370,16 @@ pub fn openvex(_lock: &LockfileModel, report: &SentinelReport) -> Value {
             let id = advisory_id(f);
             let product = format!("pkg:cargo/{name}@{version}");
             if ignored.iter().any(|i| i == id) {
+                // OpenVEX `not_affected` needs a justification OR an impact
+                // statement. We cannot assert a specific machine-readable
+                // justification (the operator may have ignored the advisory for any
+                // reason), so state the waiver as a free-text impact statement
+                // rather than claiming, falsely, that the code is unreachable.
                 json!({
                     "vulnerability": { "name": id },
                     "products": [ { "@id": product } ],
                     "status": "not_affected",
-                    "justification": "vulnerable_code_not_in_execute_path",
-                    "status_notes": "waived by rustinel policy (advisories.ignore)",
+                    "impact_statement": "waived by rustinel policy (advisories.ignore)",
                 })
             } else {
                 json!({
@@ -360,7 +430,6 @@ mod tests {
             },
             checksum: None,
             dependencies: vec![],
-            lockfile_line: None,
         }
     }
 
@@ -434,11 +503,32 @@ mod tests {
         let v = spdx(&lock, &report);
         assert_eq!(v["spdxVersion"], "SPDX-2.3");
         assert_eq!(v["SPDXID"], "SPDXRef-DOCUMENT");
-        assert_eq!(v["packages"].as_array().unwrap().len(), 2);
-        assert_eq!(v["packages"][0]["SPDXID"], "SPDXRef-Package-0");
+        // The analyzed project (root) plus its two registry dependencies.
+        let pkgs = v["packages"].as_array().unwrap();
+        assert_eq!(pkgs.len(), 3);
+        assert_eq!(pkgs[0]["SPDXID"], "SPDXRef-Package-root");
+        assert_eq!(pkgs[0]["name"], "demo");
+        // A dependency carries its purl externalRef (serde sorts first -> Package-0).
+        assert_eq!(pkgs[1]["SPDXID"], "SPDXRef-Package-0");
         assert_eq!(
-            v["packages"][0]["externalRefs"][0]["referenceLocator"],
+            pkgs[1]["externalRefs"][0]["referenceLocator"],
             "pkg:cargo/serde@1.0.0"
+        );
+        // DOCUMENT DESCRIBES the root; the root DEPENDS_ON its deps.
+        let rels = v["relationships"].as_array().unwrap();
+        assert!(rels.iter().any(|r| r["spdxElementId"] == "SPDXRef-DOCUMENT"
+            && r["relatedSpdxElement"] == "SPDXRef-Package-root"
+            && r["relationshipType"] == "DESCRIBES"));
+        assert!(rels
+            .iter()
+            .any(|r| r["spdxElementId"] == "SPDXRef-Package-root"
+                && r["relationshipType"] == "DEPENDS_ON"));
+        // documentNamespace is unique per content (carries a fingerprint suffix).
+        let ns = v["documentNamespace"].as_str().unwrap();
+        let prefix = "https://rustinel.dev/spdx/demo/";
+        assert!(
+            ns.starts_with(prefix) && ns.len() > prefix.len(),
+            "ns: {ns}"
         );
     }
 
@@ -446,9 +536,13 @@ mod tests {
     fn osv_shape() {
         let (lock, report) = fixture();
         let v = osv(&lock, &report);
-        assert_eq!(v["results"][0]["id"], "RUSTSEC-2020-0071");
-        assert_eq!(v["results"][0]["affected"][0]["package"]["name"], "time");
-        assert_eq!(v["results"][0]["affected"][0]["versions"][0], "0.2.22");
+        // A JSON array of OSV vulnerability records, no `results` envelope.
+        let recs = v.as_array().unwrap();
+        assert_eq!(recs[0]["id"], "RUSTSEC-2020-0071");
+        assert_eq!(recs[0]["modified"], "1970-01-01T00:00:00Z");
+        assert_eq!(recs[0]["affected"][0]["package"]["name"], "time");
+        assert_eq!(recs[0]["affected"][0]["package"]["ecosystem"], "crates.io");
+        assert_eq!(recs[0]["affected"][0]["versions"][0], "0.2.22");
     }
 
     #[test]
@@ -470,9 +564,11 @@ mod tests {
         let v = openvex(&lock, &report);
         assert_eq!(v["statements"][0]["status"], "not_affected");
         assert_eq!(
-            v["statements"][0]["justification"],
-            "vulnerable_code_not_in_execute_path"
+            v["statements"][0]["impact_statement"],
+            "waived by rustinel policy (advisories.ignore)"
         );
+        // Must not assert a specific (and likely false) machine-readable justification.
+        assert!(v["statements"][0]["justification"].is_null());
     }
 
     #[test]

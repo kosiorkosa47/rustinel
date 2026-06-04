@@ -51,7 +51,6 @@ pub struct Package {
     pub id: PackageId,
     pub checksum: Option<String>,
     pub dependencies: Vec<String>,
-    pub lockfile_line: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,7 +112,6 @@ pub fn parse_lockfile_str(path: PathBuf, content: &str) -> Result<LockfileModel,
                 .iter()
                 .map(|d| d.name.as_str().to_string())
                 .collect(),
-            lockfile_line: None,
         })
         .collect();
 
@@ -136,8 +134,11 @@ fn extract_top_version(content: &str) -> Option<u32> {
         if line.starts_with("[[package]]") {
             break;
         }
-        if let Some(rest) = line.strip_prefix("version = ") {
-            return rest.trim().trim_matches('"').parse::<u32>().ok();
+        // Tolerate any spacing around `=` (`version=3`, `version  =  3`, tabs).
+        if let Some(rest) = line.strip_prefix("version") {
+            if let Some(value) = rest.trim_start().strip_prefix('=') {
+                return value.trim().trim_matches('"').parse::<u32>().ok();
+            }
         }
     }
     None
@@ -248,6 +249,22 @@ checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         let model = parse_lockfile_str(PathBuf::from("Cargo.lock"), "version = 4\n").unwrap();
         assert!(model.packages.is_empty());
         assert_eq!(model.version, Some(4));
+    }
+
+    #[test]
+    fn version_field_tolerates_nonstandard_spacing() {
+        // The lockfile format version must parse regardless of spacing around `=`.
+        assert_eq!(extract_top_version("version = 3\n"), Some(3));
+        assert_eq!(extract_top_version("version=3\n"), Some(3));
+        assert_eq!(extract_top_version("version  =  3\n"), Some(3));
+        assert_eq!(extract_top_version("version =\t4\n"), Some(4));
+        // A `version` after the first [[package]] is not the format version.
+        assert_eq!(
+            extract_top_version("[[package]]\nversion = \"9.9.9\"\n"),
+            None
+        );
+        // A different key is not the version.
+        assert_eq!(extract_top_version("name = \"x\"\n"), None);
     }
 
     #[test]
