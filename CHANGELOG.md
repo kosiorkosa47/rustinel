@@ -56,4 +56,21 @@ any advisory is filed. See [`docs/PROACTIVE-DETECTION.md`](docs/PROACTIVE-DETECT
 - Core is network- and process-free; all I/O with the world lives in the CLI.
 - Hardened against path traversal, symlink escape, decompression/size DoS, and
   Markdown/SARIF injection; deterministic fuzz/robustness tests + a `cargo fuzz`
-  harness. See `SECURITY.md` and `docs/DESIGN.md`.
+  harness (seven targets). See `SECURITY.md` and `docs/DESIGN.md`.
+- **Adversarial hardening pass** — a multi-round find→refute→fix audit closed
+  defects across correctness, output-encoding, and robustness, each with a
+  regression test:
+  - terminal-output injection: the human renderer now neutralizes control and
+    bidi-override characters in untrusted fields (a dependency's `license` could
+    otherwise forge report lines / inject ANSI), matching the Markdown renderer.
+  - `--offline` never hard-fails: the explicit-DB and default-cache advisory
+    paths share one degrade-to-empty branch.
+  - byte-identical output across filesystems: source-walk evidence paths are
+    selected from a name-sorted, memory-bounded directory walk, not native
+    `read_dir` order.
+  - proactive-signal precision: the source-exfil fingerprint requires its
+    conjunction within a single file (no cross-file false attribution), and the
+    yanked/denied signals are crates.io-scoped.
+  - no silent failures: a present-but-malformed `rustinel-trust.toml` warns
+    loudly instead of silently disabling ownership-change detection; metadata
+    lookups warn when capped.
