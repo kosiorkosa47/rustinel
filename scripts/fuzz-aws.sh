@@ -15,7 +15,7 @@ CORE_DIR="$REPO_ROOT/crates/rustinel-core"
 FUZZ_DIR="$CORE_DIR/fuzz"
 CORPUS_DIR="$FUZZ_DIR/corpus"
 
-TARGETS=(lockfile policy unsafe_scan build_intent advisory spdx)
+TARGETS=(lockfile policy unsafe_scan build_intent advisory spdx typosquat)
 TOTAL_SECONDS="${TOTAL_SECONDS:-14400}"          # default 4h
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}"
 PER_TARGET=$(( TOTAL_SECONDS / ${#TARGETS[@]} ))
@@ -50,6 +50,10 @@ seed build_intent "$REPO_ROOT"/fixtures/mock_registry/*/build.rs
 # SPDX expressions.
 printf 'MIT OR Apache-2.0\n' > "$CORPUS_DIR/spdx_seed1"; mkdir -p "$CORPUS_DIR/spdx"; mv "$CORPUS_DIR/spdx_seed1" "$CORPUS_DIR/spdx/seed1"
 printf '(MIT OR Apache-2.0) AND BSD-3-Clause WITH LLVM-exception\n' > "$CORPUS_DIR/spdx/seed2"
+# Typosquat distance — crate-name-ish strings the harness splits in half.
+mkdir -p "$CORPUS_DIR/typosquat"
+printf 'serdeserd\n' > "$CORPUS_DIR/typosquat/seed1"
+printf 'tokiotokoi\n' > "$CORPUS_DIR/typosquat/seed2"
 
 # --- 2. run -----------------------------------------------------------------
 cd "$CORE_DIR"

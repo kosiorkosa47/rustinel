@@ -12,7 +12,7 @@ the parsers on every `cargo test`. No nightly required.
 
 ## 2. Deep libFuzzer harness (nightly, AWS)
 
-`crates/rustinel-core/fuzz/` — six coverage-guided targets over the
+`crates/rustinel-core/fuzz/` — seven coverage-guided targets over the
 edge-case-prone code:
 
 | Target | Exercises |
@@ -23,6 +23,7 @@ edge-case-prone code:
 | `build_intent` | build.rs network/payload scanner |
 | `advisory` | RustSec `.md` fenced-TOML / `.toml` extractor |
 | `spdx` | SPDX `AND`/`OR`/`WITH`/paren license evaluator |
+| `typosquat` | Damerau-Levenshtein edit distance (byte-sliced) |
 
 ### Turnkey AWS run
 

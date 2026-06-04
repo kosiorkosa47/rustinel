@@ -65,5 +65,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "typosquat"
+path = "fuzz_targets/typosquat.rs"
+test = false
+doc = false
+bench = false
+
 [profile.release]
 debug = 1
