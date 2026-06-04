@@ -53,7 +53,7 @@ runs:
   steps:
     - name: Install rustinel
       shell: bash
-      run: cargo install cargo-rustinel --locked || cargo install --path . --locked
+      run: cargo install cargo-rustinel --locked || cargo install --path crates/rustinel-cli --locked
 
     - name: Run rustinel
       id: run

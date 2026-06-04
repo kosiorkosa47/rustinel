@@ -197,7 +197,7 @@ jobs:
           online-metadata: "true"
 ```
 
-See `action/action.yml` and `examples/github-action.yml`.
+See `action.yml` and `examples/github-action.yml`.
 
 ## Standards & interchange
 
@@ -229,7 +229,7 @@ for the full threat model and reporting process.
 ```text
 crates/rustinel-core/   # analysis library (lockfile, signals, risk, policy, advisory, reporters)
 crates/rustinel-cli/    # `cargo-rustinel` binary
-action/action.yml       # GitHub Action
+action.yml              # GitHub Action (repo root, for Marketplace)
 fixtures/               # offline test fixtures
 schemas/                # JSON schemas for report & policy
 examples/               # policies + sample reports

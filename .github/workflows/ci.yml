@@ -69,21 +69,43 @@ jobs:
           scripts/audit-diff.sh Cargo.lock
           scripts/audit-diff.sh fixtures/parity/Cargo.lock
 
-  # Dogfood: rustinel analyzes its own lockfile and posts/uploads the report.
+  # Dogfood: rustinel reviews its own supply chain, posts a sticky PR comment,
+  # and uploads the report. Informational — never fails the build on its own risk.
   self-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release -p cargo-rustinel
+      - name: Sync the RustSec advisory database
+        run: ./target/release/cargo-rustinel rustinel advisory update || true
       - name: Scan own lockfile
         run: |
           ./target/release/cargo-rustinel rustinel check \
             --lockfile Cargo.lock \
             --format markdown \
-            --output rustinel-report.md
+            --output rustinel-report.md --no-timestamp || true
+      - name: Post sticky PR comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MARKER="<!-- rustinel-report -->"
+          BODY="$(printf '%s\n%s\n' "$MARKER" "$(cat rustinel-report.md)")"
+          PR="${{ github.event.pull_request.number }}"
+          REPO="${{ github.repository }}"
+          EXISTING="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq "map(select(.body | startswith(\"$MARKER\"))) | .[0].id // empty")"
+          if [ -n "$EXISTING" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -f body="$BODY" >/dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" >/dev/null
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
