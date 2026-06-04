@@ -40,7 +40,7 @@ pub struct DiffInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SentinelReport {
+pub struct RustinelReport {
     pub schema_version: String,
     pub tool: ToolInfo,
     pub analysis: AnalysisInfo,
@@ -70,8 +70,8 @@ pub fn build_check_report(
     policy: PolicyDecision,
     offline: bool,
     generated_at: Option<String>,
-) -> SentinelReport {
-    SentinelReport {
+) -> RustinelReport {
+    RustinelReport {
         schema_version: SCHEMA_VERSION.into(),
         tool: tool_info(),
         analysis: AnalysisInfo {
@@ -97,7 +97,7 @@ pub fn build_diff_report(
     policy: PolicyDecision,
     offline: bool,
     generated_at: Option<String>,
-) -> SentinelReport {
+) -> RustinelReport {
     let head_score = head_risk.score;
     let diff_info = DiffInfo {
         base_score,
@@ -107,7 +107,7 @@ pub fn build_diff_report(
         removed: diff.removed,
         changed: diff.changed,
     };
-    SentinelReport {
+    RustinelReport {
         schema_version: SCHEMA_VERSION.into(),
         tool: tool_info(),
         analysis: AnalysisInfo {
@@ -139,7 +139,7 @@ pub fn score_bar(score: u8) -> String {
     format!("[{}{}]", "█".repeat(filled), "░".repeat(20 - filled))
 }
 
-pub fn to_human(report: &SentinelReport) -> String {
+pub fn to_human(report: &RustinelReport) -> String {
     let mut out = String::new();
     out.push_str(&format!("{} {}\n\n", report.tool.name, report.tool.version));
     if let Some(diff) = &report.diff {
@@ -206,11 +206,11 @@ pub fn to_human(report: &SentinelReport) -> String {
     out
 }
 
-pub fn to_json(report: &SentinelReport) -> Result<String, serde_json::Error> {
+pub fn to_json(report: &RustinelReport) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(report)
 }
 
-pub fn to_sarif(report: &SentinelReport) -> Result<String, serde_json::Error> {
+pub fn to_sarif(report: &RustinelReport) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&sarif::build(report))
 }
 
@@ -250,7 +250,7 @@ fn severity_marker(sev: Severity) -> &'static str {
 
 /// Render a GitHub-PR-ready Markdown comment. All untrusted strings (package
 /// names, finding details) are escaped — see [`crate::markdown`].
-pub fn to_markdown(report: &SentinelReport) -> String {
+pub fn to_markdown(report: &RustinelReport) -> String {
     let mut out = String::new();
     let level = report.project.level;
     out.push_str("## rustinel — supply-chain risk\n\n");
@@ -404,7 +404,7 @@ fn render_contributor(out: &mut String, f: &RiskSignal) {
     }
 }
 
-pub fn render(report: &SentinelReport, format: OutputFormat) -> Result<String, serde_json::Error> {
+pub fn render(report: &RustinelReport, format: OutputFormat) -> Result<String, serde_json::Error> {
     Ok(match format {
         OutputFormat::Human => to_human(report),
         OutputFormat::Json => to_json(report)?,
@@ -414,7 +414,7 @@ pub fn render(report: &SentinelReport, format: OutputFormat) -> Result<String, s
 }
 
 /// True when the policy decision should cause a non-zero exit code.
-pub fn is_failing(report: &SentinelReport, fail_on_review_required: bool) -> bool {
+pub fn is_failing(report: &RustinelReport, fail_on_review_required: bool) -> bool {
     match report.policy.decision {
         Decision::Fail => true,
         Decision::ReviewRequired => fail_on_review_required,
@@ -452,7 +452,7 @@ fn sanitize_terminal(s: &str) -> String {
 
 /// A human-readable "how was this score computed" breakdown, appended to the
 /// `check`/`diff` report when `--explain` is set.
-pub fn score_explanation(report: &SentinelReport) -> String {
+pub fn score_explanation(report: &RustinelReport) -> String {
     let ex = crate::risk::explain(&report.findings);
     let mut out = String::from("\nScore breakdown:\n");
     if ex.critical_pin {
@@ -486,8 +486,8 @@ mod tests {
     use crate::risk::{level_for_score, PackageRisk, RiskLevel};
     use crate::signals::Evidence;
 
-    fn sample_report() -> SentinelReport {
-        SentinelReport {
+    fn sample_report() -> RustinelReport {
+        RustinelReport {
             schema_version: SCHEMA_VERSION.into(),
             tool: ToolInfo {
                 name: TOOL_NAME.into(),

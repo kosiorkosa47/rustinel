@@ -20,6 +20,10 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(name = "cargo-rustinel")]
+// Display the idiomatic cargo-subcommand invocation in usage/help/errors, since
+// that is how the tool is meant to be run (`cargo rustinel …`), even though the
+// binary on disk is `cargo-rustinel`.
+#[command(bin_name = "cargo rustinel")]
 #[command(about = "Defensive supply-chain risk diff for Rust projects", version)]
 struct Cli {
     #[command(subcommand)]
@@ -76,26 +80,33 @@ enum Commands {
 
     /// Compare two Cargo.lock files and report how risk changes.
     Diff {
+        /// Base Cargo.lock — the "before" state of the change.
         #[arg(long)]
         base_lockfile: PathBuf,
+        /// Head Cargo.lock — the "after" state of the change.
         #[arg(long)]
         head_lockfile: PathBuf,
 
+        /// Path to a rustinel.toml policy file.
         #[arg(long)]
         policy: Option<PathBuf>,
 
         #[arg(long, value_enum, default_value_t = CliFormat::Human)]
         format: CliFormat,
 
+        /// Write the report to a file instead of stdout.
         #[arg(long)]
         output: Option<PathBuf>,
 
+        /// Disable network access (cached advisory data only).
         #[arg(long)]
         offline: bool,
 
+        /// Directory of unpacked crate sources for static analysis (read-only).
         #[arg(long)]
         source_path: Option<PathBuf>,
 
+        /// RustSec advisory database directory.
         #[arg(long)]
         advisory_db: Option<PathBuf>,
 
@@ -104,9 +115,11 @@ enum Commands {
         #[arg(long)]
         online_metadata: bool,
 
+        /// Omit the `generated_at` timestamp for byte-identical output.
         #[arg(long)]
         no_timestamp: bool,
 
+        /// Exit non-zero when the decision is `review_required`.
         #[arg(long)]
         fail_on_review_required: bool,
 
@@ -144,24 +157,30 @@ enum Commands {
 
     /// Export a standards-based artifact (SBOM / OSV / VEX) for a lockfile.
     Export {
+        /// Artifact format to emit.
         #[arg(long, value_enum)]
         format: ExportFmt,
 
         #[arg(long, default_value = "Cargo.lock")]
         lockfile: PathBuf,
 
+        /// Write the artifact to a file instead of stdout.
         #[arg(long)]
         output: Option<PathBuf>,
 
+        /// Path to a rustinel.toml policy file (drives `not_affected` in VEX).
         #[arg(long)]
         policy: Option<PathBuf>,
 
+        /// Disable network access (cached advisory data only).
         #[arg(long)]
         offline: bool,
 
+        /// Directory of unpacked crate sources for static analysis (read-only).
         #[arg(long)]
         source_path: Option<PathBuf>,
 
+        /// RustSec advisory database directory.
         #[arg(long)]
         advisory_db: Option<PathBuf>,
 
@@ -170,6 +189,7 @@ enum Commands {
         #[arg(long)]
         online_metadata: bool,
 
+        /// Omit the `generated_at` timestamp for byte-identical output.
         #[arg(long)]
         no_timestamp: bool,
     },
@@ -831,6 +851,16 @@ fn main() -> anyhow::Result<()> {
 
         Commands::Policy { command } => match command {
             PolicyCommands::Init { profile, output } => {
+                if !matches!(profile.as_str(), "strict" | "balanced" | "permissive") {
+                    // Catch typos (e.g. `balenced`) without rejecting deliberate
+                    // custom names: a balanced baseline is emitted under the given
+                    // name, and the user is told so rather than left guessing.
+                    eprintln!(
+                        "rustinel: note: '{profile}' is not a built-in profile \
+                         (strict/balanced/permissive); writing a balanced baseline \
+                         named '{profile}' — edit it as needed."
+                    );
+                }
                 let template = policy_template(&profile);
                 emit(&template, &output)?;
             }

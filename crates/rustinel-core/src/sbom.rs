@@ -10,7 +10,7 @@
 //! safely JSON-encoded with no injection surface.
 
 use crate::lockfile::{LockfileModel, Package};
-use crate::report::SentinelReport;
+use crate::report::RustinelReport;
 use crate::signals::{RiskSignal, Severity};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 /// Per-package declared license (SPDX expression), recovered from the
 /// `license_detected` findings produced when source was scanned. Enables the
 /// per-component "License" field required by the 2025 CISA SBOM minimum elements.
-fn license_map(report: &SentinelReport) -> BTreeMap<String, String> {
+fn license_map(report: &RustinelReport) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     for f in &report.findings {
         if f.id == "license_detected" {
@@ -66,7 +66,7 @@ fn purl(pkg: &Package) -> String {
 }
 
 /// Advisory findings only (the ones representing real, identified vulnerabilities).
-fn advisory_findings(report: &SentinelReport) -> Vec<&RiskSignal> {
+fn advisory_findings(report: &RustinelReport) -> Vec<&RiskSignal> {
     let mut v: Vec<&RiskSignal> = report
         .findings
         .iter()
@@ -92,7 +92,7 @@ fn finding_summary(finding: &RiskSignal) -> String {
 pub fn render(
     format: ExportFormat,
     lock: &LockfileModel,
-    report: &SentinelReport,
+    report: &RustinelReport,
 ) -> Result<String, serde_json::Error> {
     let value = match format {
         ExportFormat::CycloneDx => cyclonedx(lock, report),
@@ -127,7 +127,7 @@ fn cdx_severity(sev: Severity) -> &'static str {
     }
 }
 
-pub fn cyclonedx(lock: &LockfileModel, report: &SentinelReport) -> Value {
+pub fn cyclonedx(lock: &LockfileModel, report: &RustinelReport) -> Value {
     let licenses = license_map(report);
     let components: Vec<Value> = sorted_components(lock)
         .iter()
@@ -195,7 +195,7 @@ pub fn cyclonedx(lock: &LockfileModel, report: &SentinelReport) -> Value {
 
 // --- SPDX 2.3 ----------------------------------------------------------------
 
-pub fn spdx(lock: &LockfileModel, report: &SentinelReport) -> Value {
+pub fn spdx(lock: &LockfileModel, report: &RustinelReport) -> Value {
     let created = report
         .analysis
         .generated_at
@@ -314,7 +314,7 @@ fn content_fingerprint(comps: &[&Package]) -> String {
 
 // --- OSV (osv.dev schema) ----------------------------------------------------
 
-pub fn osv(_lock: &LockfileModel, report: &SentinelReport) -> Value {
+pub fn osv(_lock: &LockfileModel, report: &RustinelReport) -> Value {
     // OSV requires `modified`; keep it deterministic (the analysis timestamp, or a
     // fixed epoch when timestamps are suppressed for byte-identical output).
     let modified = report
@@ -351,7 +351,7 @@ pub fn osv(_lock: &LockfileModel, report: &SentinelReport) -> Value {
 
 // --- OpenVEX -----------------------------------------------------------------
 
-pub fn openvex(_lock: &LockfileModel, report: &SentinelReport) -> Value {
+pub fn openvex(_lock: &LockfileModel, report: &RustinelReport) -> Value {
     let timestamp = report
         .analysis
         .generated_at
@@ -412,7 +412,7 @@ fn split_pkg(pkg: &str) -> (&str, &str) {
 mod tests {
     use super::*;
     use crate::policy::{Decision, PolicyDecision};
-    use crate::report::{AnalysisInfo, SentinelReport, ToolInfo, SCHEMA_VERSION, TOOL_NAME};
+    use crate::report::{AnalysisInfo, RustinelReport, ToolInfo, SCHEMA_VERSION, TOOL_NAME};
     use crate::risk::{level_for_score, ProjectRisk};
     use crate::signals::{Evidence, RiskSignal};
     use std::path::PathBuf;
@@ -433,7 +433,7 @@ mod tests {
         }
     }
 
-    fn fixture() -> (LockfileModel, SentinelReport) {
+    fn fixture() -> (LockfileModel, RustinelReport) {
         let lock = LockfileModel {
             path: PathBuf::from("Cargo.lock"),
             version: Some(3),
@@ -443,7 +443,7 @@ mod tests {
                 pkg("serde", "1.0.0", false),
             ],
         };
-        let report = SentinelReport {
+        let report = RustinelReport {
             schema_version: SCHEMA_VERSION.into(),
             tool: ToolInfo {
                 name: TOOL_NAME.into(),

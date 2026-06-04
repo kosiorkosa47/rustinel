@@ -29,7 +29,7 @@ pub mod signals;
 pub mod fuzz_api;
 
 pub use errors::RustinelError;
-pub use report::{OutputFormat, SentinelReport};
+pub use report::{OutputFormat, RustinelReport};
 
 use std::path::{Path, PathBuf};
 
@@ -134,7 +134,7 @@ fn collect_findings(
 pub fn analyze_lockfile(
     path: &Path,
     options: AnalysisOptions,
-) -> Result<SentinelReport, RustinelError> {
+) -> Result<RustinelReport, RustinelError> {
     let lock = lockfile::parse_lockfile(path)?;
     let findings = collect_findings(&lock, &options)?;
     let risk = risk::score_project(&lock, &findings);
@@ -154,7 +154,7 @@ pub fn analyze_diff(
     base_path: &Path,
     head_path: &Path,
     options: AnalysisOptions,
-) -> Result<SentinelReport, RustinelError> {
+) -> Result<RustinelReport, RustinelError> {
     let base_lock = lockfile::parse_lockfile(base_path)?;
     let head_lock = lockfile::parse_lockfile(head_path)?;
 

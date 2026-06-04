@@ -144,7 +144,7 @@ Responsible for:
 
 Responsible for:
 
-- `SentinelReport`,
+- `RustinelReport`,
 - `DiffReport`,
 - JSON serialization,
 - generating Markdown,
@@ -203,7 +203,7 @@ PackageRisk
 ProjectRisk
 Policy
 PolicyDecision
-SentinelReport
+RustinelReport
 DiffReport
 OutputFormat
 ```

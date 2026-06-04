@@ -4,7 +4,7 @@
 //! Message text is plain (SARIF consumers render it as text, not HTML), but we
 //! still flatten control characters defensively.
 
-use crate::report::SentinelReport;
+use crate::report::RustinelReport;
 use crate::signals::{RiskSignal, Severity};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -73,7 +73,7 @@ fn flatten(text: &str) -> String {
         .collect()
 }
 
-pub fn build(report: &SentinelReport) -> SarifLog {
+pub fn build(report: &RustinelReport) -> SarifLog {
     // One rule per distinct finding id, in deterministic order.
     let mut rules_map: BTreeMap<String, SarifRule> = BTreeMap::new();
     for finding in &report.findings {
