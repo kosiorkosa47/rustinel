@@ -704,6 +704,11 @@ const SECRET_MARKERS: &[&str] = &[
     "ethereum",
     "Ethereum",
     "wallet",
+    // Key-format literals — catch harvesting even when the keyword vocabulary is
+    // obfuscated: the base58 alphabet (Solana / BTC secrets) and an Ethereum
+    // private-key regex (`0x` + 64 hex). Decisive substrings; rare in non-crypto code.
+    "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijk",
+    "[0-9a-fA-F]{64}",
 ];
 /// Markers that code walks/reads the *consuming project's* `.rs` source — almost
 /// never legitimate for a runtime library.
