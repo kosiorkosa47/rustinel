@@ -363,7 +363,7 @@ fn gather_ownership(
     if let Ok(lock) = rustinel_core::lockfile::parse_lockfile(lockfile) {
         let names: Vec<String> = lock
             .registry_packages()
-            .filter(|p| trusted.contains_key(&p.id.name))
+            .filter(|p| p.id.is_crates_io() && trusted.contains_key(&p.id.name))
             .map(|p| p.id.name.clone())
             .collect::<BTreeSet<String>>()
             .into_iter()
@@ -372,8 +372,12 @@ fn gather_ownership(
             eprintln!("rustinel: checking crates.io ownership against the trust baseline...");
             let owners = registry::fetch_owners(&names);
             for pkg in lock.registry_packages() {
-                if let Some(o) = owners.get(&pkg.id.name) {
-                    metadata.entry(pkg.id.to_string()).or_default().owners = o.clone();
+                // Only attach crates.io owners to genuine crates.io packages — a
+                // git/alt-registry crate sharing the name is a different package.
+                if pkg.id.is_crates_io() {
+                    if let Some(o) = owners.get(&pkg.id.name) {
+                        metadata.entry(pkg.id.to_string()).or_default().owners = o.clone();
+                    }
                 }
             }
         }
@@ -791,8 +795,12 @@ fn main() -> anyhow::Result<()> {
         } => {
             let policy_path = policy.or_else(discover_policy);
             let yanked = gather_yanked(online_metadata, offline, &[&base_lockfile, &head_lockfile]);
-            let metadata =
+            let mut metadata =
                 gather_metadata_for_diff(online_metadata, offline, &base_lockfile, &head_lockfile);
+            // Ownership-change detection must work in diff (PR) mode too — load the
+            // baseline and fetch current owners for the head lockfile, like `check`.
+            let trusted_owners =
+                gather_ownership(online_metadata, offline, &head_lockfile, &mut metadata);
             let options = AnalysisOptions {
                 offline,
                 policy: load_policy(&policy_path)?,
@@ -800,7 +808,7 @@ fn main() -> anyhow::Result<()> {
                 advisory_db_path: advisory_db,
                 yanked,
                 metadata,
-                trusted_owners: Default::default(),
+                trusted_owners,
                 generated_at: timestamp(no_timestamp),
             };
             let report = rustinel_core::analyze_diff(&base_lockfile, &head_lockfile, options)
@@ -845,6 +853,12 @@ fn main() -> anyhow::Result<()> {
                 );
             }
             let owners = snapshot_owners(&lockfile)?;
+            if owners.is_empty() {
+                anyhow::bail!(
+                    "no owners could be fetched from crates.io (network issue, or no crates.io \
+                     dependencies); refusing to overwrite the existing baseline with an empty one"
+                );
+            }
             let path = std::path::PathBuf::from(trust::TRUST_FILE);
             trust::write(&path, owners.clone())
                 .with_context(|| format!("writing {}", path.display()))?;
@@ -1050,7 +1064,6 @@ fail_on_yanked = true
 warn_on_build_rs = false
 require_review_on_build_rs = {require_review_on_build_rs}
 require_review_on_native_ffi = {require_review_on_native_ffi}
-warn_on_unsafe_increase = true
 fail_on_denied_license = true
 warn_on_unknown_license = {warn_on_unknown_license}
 fail_on_unknown_license = {fail_on_unknown_license}
