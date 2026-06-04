@@ -187,6 +187,48 @@ fn dependency_confusion_popular_name_from_non_crates_io_flagged() {
             .any(|f| f.id == "source_substitution" && f.package == "serde@1.0.219"),
         "a popular crate name from a non-crates.io source must be flagged",
     );
+    // ...and it must drive the decision, not merely the score.
+    assert!(
+        report
+            .policy
+            .review_items
+            .iter()
+            .chain(report.policy.violations.iter())
+            .any(|s| s.contains("serde")),
+        "the substitution must surface in the policy decision (review/violation)",
+    );
+}
+
+/// Regression for the policy/baseline gap: dependency confusion targets popular,
+/// trusted names — including ones on rustinel's own known-good baseline (here
+/// `libc`). The signal must survive the baseline AND drive the decision, never a
+/// silent pass. (Before the fix this returned 0/100 PASS.)
+#[test]
+fn dependency_confusion_on_known_good_crate_is_not_a_silent_pass() {
+    let lock = fixtures().join("attacks/dependency-confusion-known-good/Cargo.lock");
+    let options = AnalysisOptions {
+        offline: true,
+        advisory_db_path: Some(PathBuf::from("/nonexistent-rustinel-proactive-test-db")),
+        ..Default::default()
+    };
+    let report = analyze_lockfile(&lock, options).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.id == "source_substitution" && f.package == "libc@0.2.0"),
+        "the signal must survive the known-good baseline (libc is known-good)",
+    );
+    assert!(
+        report
+            .policy
+            .review_items
+            .iter()
+            .chain(report.policy.violations.iter())
+            .any(|s| s.contains("libc")),
+        "dependency confusion on a known-good crate must surface in the decision, not be a silent pass",
+    );
 }
 
 /// Low-false-positive guard: an ordinary HTTP client (network + env config, no

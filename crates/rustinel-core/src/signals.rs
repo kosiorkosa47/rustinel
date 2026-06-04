@@ -1114,17 +1114,22 @@ pub fn is_known_good(name: &str) -> bool {
 /// zero weight, appending a note. Advisory findings are left untouched.
 fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
     for signal in signals.iter_mut() {
-        // Advisory matches, yanked status, *suspicious* build scripts, typosquats
-        // and ownership changes are strong evidence, never suppressed by the
-        // baseline. Ownership change in particular MUST survive the baseline: the
-        // xz and event-stream takeovers happened on ubiquitous, "known-good"
-        // crates — silencing it there would blind the signal to its main target.
+        // Advisory matches, yanked status, *suspicious* build scripts, typosquats,
+        // ownership changes and the malware / dependency-confusion source signals
+        // are strong evidence, never suppressed by the baseline. Ownership change
+        // and source substitution in particular MUST survive: the xz and
+        // event-stream takeovers and dependency-confusion attacks all target
+        // ubiquitous, "known-good" crates — silencing them there blinds the signal
+        // to its main target.
         if signal.id.starts_with("advisory_")
             || signal.id == "yanked_crate"
             || signal.id == "build_script_suspicious"
             || signal.id == "suspicious_source_exfil"
+            || signal.id == "suspicious_exfil_domain"
+            || signal.id == "env_gated_payload"
             || signal.id == "possible_typosquat"
             || signal.id == "owners_changed"
+            || signal.id == "source_substitution"
         {
             continue;
         }

@@ -433,6 +433,81 @@ pub fn evaluate(
                     warnings.push(format!("`{}` is yanked", signal.package));
                 }
             }
+            // Env-gated download-and-execute (the rustdecimal pattern): a
+            // malware-class source signal — strict fails, otherwise demands review.
+            "env_gated_payload" => {
+                if eff.profile == "strict" && !allowlisted {
+                    violations.push(format!(
+                        "`{}` source gates a download-and-execute on an environment variable",
+                        signal.package
+                    ));
+                } else {
+                    review_items.push(format!(
+                        "`{}` source gates a download-and-execute on an environment variable",
+                        signal.package
+                    ));
+                }
+            }
+            // A data-exfiltration domain hard-coded in source (the faster_log
+            // pattern): malware-class — strict fails, otherwise demands review.
+            "suspicious_exfil_domain" => {
+                if eff.profile == "strict" && !allowlisted {
+                    violations.push(format!(
+                        "`{}` source references a data-exfiltration domain",
+                        signal.package
+                    ));
+                } else {
+                    review_items.push(format!(
+                        "`{}` source references a data-exfiltration domain",
+                        signal.package
+                    ));
+                }
+            }
+            // Maintainer takeover (xz / event-stream): the ownership change demands
+            // a human look; strict treats it as blocking.
+            "owners_changed" => {
+                if eff.profile == "strict" && !allowlisted {
+                    violations.push(format!(
+                        "`{}` crates.io owners changed since the trust baseline",
+                        signal.package
+                    ));
+                } else {
+                    review_items.push(format!(
+                        "`{}` crates.io owners changed since the trust baseline",
+                        signal.package
+                    ));
+                }
+            }
+            // Dependency confusion / source substitution: a trusted name from a
+            // non-crates.io source demands review; strict treats it as blocking.
+            "source_substitution" => {
+                if eff.profile == "strict" && !allowlisted {
+                    violations.push(format!(
+                        "`{}` resolves from a non-crates.io source (possible dependency confusion)",
+                        signal.package
+                    ));
+                } else {
+                    review_items.push(format!(
+                        "`{}` resolves from a non-crates.io source (possible dependency confusion)",
+                        signal.package
+                    ));
+                }
+            }
+            // Freshly published ("new == unreviewed"): the softest signal — review
+            // under strict, a warning otherwise.
+            "freshly_published" => {
+                if eff.profile == "strict" && !allowlisted {
+                    review_items.push(format!(
+                        "`{}` was published very recently (little time for review)",
+                        signal.package
+                    ));
+                } else {
+                    warnings.push(format!(
+                        "`{}` was published very recently (little time for review)",
+                        signal.package
+                    ));
+                }
+            }
             _ => {}
         }
     }

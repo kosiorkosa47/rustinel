@@ -1,0 +1,15 @@
+# Dependency confusion targeting a crate on rustinel's own known-good baseline
+# (`libc`). These ubiquitous, trusted names are exactly what such attacks target,
+# so the signal must survive the known-good baseline and drive the decision —
+# never a silent pass.
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["libc"]
+
+[[package]]
+name = "libc"
+version = "0.2.0"
+source = "git+https://github.com/attacker/libc-fork#0000000000000000000000000000000000000000"
