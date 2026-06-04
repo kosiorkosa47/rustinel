@@ -134,6 +134,7 @@ claim is narrow and honest:
 | Dependency name is one edit from a popular crate | blind | `possible_typosquat` |
 | `build.rs` makes a network call (static read) | blind | `build_script_suspicious` |
 | Runtime crypto-stealer exfiltrating to a Workers/webhook/paste drop (faster_log, Sept 2025) | blind | `suspicious_exfil_domain` |
+| Env-gated download-and-execute in a typosquat (rustdecimal, 2022) | blind | `env_gated_payload` |
 
 rustinel matches `cargo audit` on advisories and adds the pre-advisory signals it
 structurally cannot produce — statically, offline, and without ever executing a

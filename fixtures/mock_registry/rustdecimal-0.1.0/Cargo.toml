@@ -1,0 +1,5 @@
+[package]
+name = "rustdecimal"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture: reconstruction of the rustdecimal typosquat (crates.io, 2022)."

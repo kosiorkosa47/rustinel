@@ -141,3 +141,27 @@ fn faster_log_class_exfil_domain_flagged_statically() {
         "source-scan fingerprint should NOT fire (the crate reads logs, not .rs)",
     );
 }
+
+/// **rustdecimal (crates.io, 2022).** A typosquat of `rust_decimal` whose
+/// `Decimal::new` checked the `GITLAB_CI` environment variable and, when set,
+/// downloaded a binary to `/tmp` and executed it. rustinel flags the env-gated
+/// download-and-execute pattern from a static read — before any advisory exists.
+#[test]
+fn rustdecimal_env_gated_payload_flagged_statically() {
+    let lock = fixtures().join("attacks/rustdecimal/Cargo.lock");
+    let options = AnalysisOptions {
+        offline: true,
+        advisory_db_path: Some(PathBuf::from("/nonexistent-rustinel-proactive-test-db")),
+        source_path: Some(fixtures().join("mock_registry")),
+        ..Default::default()
+    };
+    let report = analyze_lockfile(&lock, options).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.id == "env_gated_payload" && f.package == "rustdecimal@0.1.0"),
+        "the env-gated download-and-execute must be flagged",
+    );
+}

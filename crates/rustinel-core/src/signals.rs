@@ -745,6 +745,9 @@ struct ExfilScan {
     scans_source: bool,
     secrets: bool,
     exfil_domain: Option<String>,
+    /// A single runtime file reads an env var AND makes a network call AND spawns
+    /// a process — the env-gated remote-payload pattern (rustdecimal, 2022).
+    env_gated: bool,
 }
 
 /// Scan a crate's `src` tree (read-only, bounded, symlink-safe) for the runtime
@@ -785,12 +788,20 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<(ExfilScan, PathBuf)> {
                     let net = BUILD_RS_NETWORK.iter().any(|m| c.contains(m));
                     let sec = SECRET_MARKERS.iter().any(|m| c.contains(m));
                     let domain_here = SUSPICIOUS_EXFIL_DOMAINS.iter().find(|d| c.contains(**d));
+                    // Env-gated remote payload (rustdecimal, 2022): one file reads
+                    // an env var, fetches over the network, and spawns a process.
+                    let env_gated = (c.contains("env::var") || c.contains("var_os"))
+                        && net
+                        && (c.contains("Command::new")
+                            || c.contains("process::Command")
+                            || c.contains("libc::system"));
+                    found.env_gated |= env_gated;
                     if found.exfil_domain.is_none() {
                         if let Some(d) = domain_here {
                             found.exfil_domain = Some((*d).to_string());
                         }
                     }
-                    if (scans || domain_here.is_some()) && sample.is_none() {
+                    if (scans || domain_here.is_some() || env_gated) && sample.is_none() {
                         sample = Some(path.clone());
                     }
                     found.scans_source |= scans;
@@ -865,6 +876,31 @@ fn exfil_domain_signal(package: &str, domain: &str, path: String) -> RiskSignal 
             "Confirm why this dependency contacts that endpoint. Cloudflare Workers, Telegram, \
              IP-geolocation and paste/webhook services are common exfiltration channels — the \
              faster_log crypto-stealer (Sept 2025) shipped harvested keys to a `*.workers.dev` URL."
+                .into(),
+    }
+}
+
+/// Build an `env_gated_payload` signal: a runtime file that reads an environment
+/// variable, fetches over the network, and spawns a process — the rustdecimal
+/// (2022) fingerprint, where the malicious `Decimal::new` checked `GITLAB_CI`,
+/// downloaded a binary, and executed it. Read statically, never run.
+fn env_gated_payload_signal(package: &str, path: String) -> RiskSignal {
+    RiskSignal {
+        id: "env_gated_payload".into(),
+        package: package.to_string(),
+        severity: Severity::High,
+        weight: 24,
+        confidence: 0.5,
+        evidence: vec![Evidence::with_path(
+            "source",
+            path,
+            "runtime source reads an environment variable, makes a network request, and spawns a \
+             process — the env-gated remote-payload pattern (scanned statically, never executed)",
+        )],
+        recommendation:
+            "A dependency that gates a download-and-execute on an environment variable (e.g. a CI \
+             flag) is the rustdecimal supply-chain pattern. Review this code before building; \
+             report it if it is not yours."
                 .into(),
     }
 }
@@ -1200,6 +1236,13 @@ fn collect_source_signals(
                 signals.push(exfil_domain_signal(
                     &package.id.to_string(),
                     domain,
+                    rel_display(source_root, &sample),
+                ));
+            }
+            // Env-gated remote payload (rustdecimal, 2022): env var + network + spawn.
+            if scan.env_gated {
+                signals.push(env_gated_payload_signal(
+                    &package.id.to_string(),
                     rel_display(source_root, &sample),
                 ));
             }
@@ -1952,6 +1995,7 @@ mod tests {
             network: false,
             secrets: false,
             exfil_domain: None,
+            env_gated: false,
         };
         assert!(source_exfil_signal("x@1", &only_scan, "lib.rs".into()).is_none());
         // network alone -> not enough (reqwest is a normal dependency).
@@ -1960,6 +2004,7 @@ mod tests {
             network: true,
             secrets: false,
             exfil_domain: None,
+            env_gated: false,
         };
         assert!(source_exfil_signal("x@1", &only_net, "lib.rs".into()).is_none());
         // scans source + secrets -> the malware fingerprint.
@@ -1968,6 +2013,7 @@ mod tests {
             network: false,
             secrets: true,
             exfil_domain: None,
+            env_gated: false,
         };
         let sig = source_exfil_signal("x@1", &bad, "lib.rs".into()).unwrap();
         assert_eq!(sig.id, "suspicious_source_exfil");
