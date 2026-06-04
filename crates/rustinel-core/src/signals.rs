@@ -857,6 +857,23 @@ impl ExfilScan {
     }
 }
 
+/// Read a directory's entries **sorted by file name**, so any walk built on it
+/// is reproducible across filesystems (ext4 hash order, APFS, and tmpfs each
+/// return `read_dir` in a different native order). Every emitted evidence path
+/// that is selected from a directory walk — the `unsafe` sample, the
+/// source-exfil / domain / env-gated samples — depends on this for the
+/// `--no-timestamp` byte-identical-output invariant to hold across machines,
+/// not just across runs on one filesystem. A failed `read_dir` yields no
+/// entries (the caller treats that the same as an empty directory).
+fn sorted_dir_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    entries
+}
+
 /// Scan a crate's `src` tree (read-only, bounded, symlink-safe) for the runtime
 /// secret-exfiltration fingerprint.
 fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
@@ -869,10 +886,7 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
     };
     let mut visited = 0usize;
     'walk: while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        for entry in sorted_dir_entries(&dir) {
             if visited >= MAX_DIR_ENTRIES {
                 // Terminate the whole walk at the cap (not just this dir), matching
                 // count_unsafe — avoids a wasted read_dir per remaining stacked dir.
@@ -1456,10 +1470,7 @@ fn count_unsafe(crate_dir: &Path) -> Option<(UnsafeStats, PathBuf)> {
 
     let mut visited = 0usize;
     while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        for entry in sorted_dir_entries(&dir) {
             if visited >= MAX_DIR_ENTRIES {
                 return sample.map(|s| (total, s));
             }
@@ -1750,9 +1761,11 @@ fn locate_crate_dir(source_root: &Path, package: &Package) -> Option<PathBuf> {
     if let Some(dir) = verify(source_root.join(&dir_name)) {
         return Some(dir);
     }
-    // One level of nesting (e.g. registry index hash dir).
-    let entries = std::fs::read_dir(source_root).ok()?;
-    for entry in entries.flatten() {
+    // One level of nesting (e.g. registry index hash dir). Sorted so that, if the
+    // same `name-version` dir exists under more than one nesting parent (e.g. two
+    // registry index hashes), the chosen crate dir — and thus every evidence path
+    // derived from it — is reproducible across filesystems.
+    for entry in sorted_dir_entries(source_root) {
         let Ok(ft) = entry.file_type() else { continue };
         if !ft.is_dir() {
             continue; // skip symlinks and files
@@ -2203,6 +2216,43 @@ mod tests {
         );
         assert!(scan.source_exfil_network);
         let _ = std::fs::remove_dir_all(&bad);
+    }
+
+    #[test]
+    fn evidence_sample_is_walk_order_independent() {
+        // Two source files both carry the `unsafe` marker. The chosen evidence
+        // path must be the lexicographically-first matching file (`a_first.rs`),
+        // never whichever one `read_dir` happens to yield first — otherwise
+        // --no-timestamp output would differ across filesystems. `sorted_dir_entries`
+        // makes the walk reproducible, so the sample is deterministic.
+        let dir = scratch_crate(
+            "unsafe_det",
+            &[
+                ("z_last.rs", "pub unsafe fn z() { unsafe {} }"),
+                ("a_first.rs", "pub unsafe fn a() { unsafe {} }"),
+            ],
+        );
+        let (stats, sample) = count_unsafe(&dir).expect("unsafe found in the crate");
+        assert!(stats.total >= 2, "both files' unsafe should be counted");
+        assert!(
+            sample.ends_with("a_first.rs"),
+            "evidence sample must be the lexicographically-first match, was {sample:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sorted_dir_entries_is_lexicographic() {
+        let dir = scratch_crate(
+            "sorted_entries",
+            &[("c.rs", "x"), ("a.rs", "x"), ("b.rs", "x")],
+        );
+        let names: Vec<String> = sorted_dir_entries(&dir.join("src"))
+            .iter()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["a.rs", "b.rs", "c.rs"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
