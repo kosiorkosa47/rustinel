@@ -235,6 +235,12 @@ fn dependency_confusion_on_known_good_crate_is_not_a_silent_pass() {
 /// malicious conjunction) must trip NONE of the proactive malice signals. A
 /// security tool that cries wolf on normal code is worse than useless, so this
 /// is the regression guard that keeps the heuristics honest.
+///
+/// `benign-codegen` is the sharper case: it DOES read the project's `.rs` files
+/// (a normal codegen helper) in one module and DOES make HTTP requests in
+/// another. Because the source-exfil fingerprint requires both in the *same*
+/// file, a crate-wide OR would mis-flag it — the exact cross-file
+/// false-attribution that pass-4 fixed. End-to-end regression for it.
 #[test]
 fn benign_http_client_trips_no_malice_signals() {
     let lock = fixtures().join("attacks/benign/Cargo.lock");
@@ -246,18 +252,20 @@ fn benign_http_client_trips_no_malice_signals() {
     };
     let report = analyze_lockfile(&lock, options).unwrap();
 
-    for id in [
-        "suspicious_exfil_domain",
-        "env_gated_payload",
-        "suspicious_source_exfil",
-        "source_substitution",
-    ] {
-        assert!(
-            !report
-                .findings
-                .iter()
-                .any(|f| f.id == id && f.package == "legit-api-client@0.1.0"),
-            "benign crate must not trip `{id}`",
-        );
+    for pkg in ["legit-api-client@0.1.0", "benign-codegen@0.1.0"] {
+        for id in [
+            "suspicious_exfil_domain",
+            "env_gated_payload",
+            "suspicious_source_exfil",
+            "source_substitution",
+        ] {
+            assert!(
+                !report
+                    .findings
+                    .iter()
+                    .any(|f| f.id == id && f.package == pkg),
+                "benign crate `{pkg}` must not trip `{id}`",
+            );
+        }
     }
 }

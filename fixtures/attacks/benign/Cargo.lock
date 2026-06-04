@@ -1,12 +1,24 @@
-# Negative control: an ordinary dependency that exercises network + env config
-# but none of the malicious conjunctions. rustinel must flag none of the
-# proactive malice signals on it.
+# Negative control: ordinary dependencies that exercise network + env config and
+# even cross-file source-scanning, but none of the malicious conjunctions.
+# rustinel must flag none of the proactive malice signals on them.
+#  - legit-api-client : a plain HTTP client.
+#  - benign-codegen   : reads `.rs` files in one module, makes HTTP in another —
+#                       the two never coincide in one file (pass-4 regression).
 version = 3
 
 [[package]]
 name = "app"
 version = "0.1.0"
-dependencies = ["legit-api-client"]
+dependencies = [
+ "benign-codegen",
+ "legit-api-client",
+]
+
+[[package]]
+name = "benign-codegen"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
 
 [[package]]
 name = "legit-api-client"

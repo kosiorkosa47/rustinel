@@ -1,0 +1,5 @@
+[package]
+name = "benign-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture: a benign crate that reads .rs files in one module (codegen) and makes HTTP requests in another. The two capabilities live in SEPARATE files, so the source-exfil conjunction never holds in one file. rustinel must NOT flag suspicious_source_exfil (cross-file false-attribution regression for pass-4)."
