@@ -6,7 +6,9 @@ name: Release
 #   cargo-rustinel-<target>.tar.gz
 on:
   push:
-    tags: ["v*"]
+    # Full semver tags only (v1.2.3) — NOT the floating major alias (v0 / v1),
+    # which is moved on every release and must not spawn its own release build.
+    tags: ["v*.*.*"]
 
 permissions:
   contents: write
