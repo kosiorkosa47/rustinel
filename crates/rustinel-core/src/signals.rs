@@ -80,6 +80,7 @@ pub fn collect_basic_signals(
     collect_freshness(lock, options, &mut signals);
     collect_owners_changed(lock, options, &mut signals);
     collect_yanked(lock, options, &mut signals);
+    collect_denied(lock, options, &mut signals);
 
     if let Some(source_root) = options.source_root() {
         collect_source_signals(lock, &source_root, &mut signals)?;
@@ -127,6 +128,11 @@ fn collect_owners_changed(
     }
     let mut done = std::collections::BTreeSet::new();
     for package in lock.registry_packages() {
+        // Ownership lives on the crates.io crate; a git / alt-registry package
+        // that merely shares a name must not be matched against the baseline.
+        if !package.id.is_crates_io() {
+            continue;
+        }
         let name = package.id.name.as_str();
         // Owners are crate-level; emit at most one signal per crate name. We mark
         // a name "done" only once we have owner metadata for it, so a version
@@ -239,6 +245,40 @@ fn collect_yanked(lock: &LockfileModel, options: &AnalysisOptions, signals: &mut
                     "this exact version has been yanked from the registry",
                 )],
                 recommendation: "Update to a non-yanked version, or replace this dependency."
+                    .into(),
+            });
+        }
+    }
+}
+
+/// Emit a `denied_crate` signal for every locked package whose crate name is on
+/// the policy `deny.crates` list. Driven from the dependency set (not from other
+/// signals), so an explicit deny is honored even when the crate is otherwise
+/// unremarkable — a name-based deny is the operator's strongest control and must
+/// never silently no-op. Weight 0: it drives the *decision*, not the score.
+fn collect_denied(lock: &LockfileModel, options: &AnalysisOptions, signals: &mut Vec<RiskSignal>) {
+    let Some(policy) = &options.policy else {
+        return;
+    };
+    let Some(deny) = &policy.deny else {
+        return;
+    };
+    if deny.crates.is_empty() {
+        return;
+    }
+    for package in lock.registry_packages() {
+        if deny.crates.iter().any(|c| c == &package.id.name) {
+            signals.push(RiskSignal {
+                id: "denied_crate".into(),
+                package: package.id.to_string(),
+                severity: Severity::High,
+                weight: 0,
+                confidence: 1.0,
+                evidence: vec![Evidence::new(
+                    "policy",
+                    format!("`{}` is on the policy deny list", package.id.name),
+                )],
+                recommendation: "Remove this dependency, or remove it from the policy deny list."
                     .into(),
             });
         }
@@ -616,6 +656,11 @@ fn collect_freshness(
     signals: &mut Vec<RiskSignal>,
 ) {
     for package in lock.registry_packages() {
+        // Only crates.io packages have crates.io publish dates; a git / alt-registry
+        // package sharing a name@version must not borrow injected metadata.
+        if !package.id.is_crates_io() {
+            continue;
+        }
         let Some(meta) = options.metadata.get(&package.id.to_string()) else {
             continue;
         };
@@ -792,27 +837,41 @@ struct ExfilScan {
     /// A single runtime file reads an env var AND makes a network call AND spawns
     /// a process — the env-gated remote-payload pattern (rustdecimal, 2022).
     env_gated: bool,
+    /// First file matching each fingerprint, so every emitted signal cites the
+    /// file it actually applies to (rather than one shared, possibly-wrong path).
+    scans_sample: Option<PathBuf>,
+    domain_sample: Option<PathBuf>,
+    env_gated_sample: Option<PathBuf>,
+}
+
+impl ExfilScan {
+    fn any_match(&self) -> bool {
+        self.scans_sample.is_some()
+            || self.domain_sample.is_some()
+            || self.env_gated_sample.is_some()
+    }
 }
 
 /// Scan a crate's `src` tree (read-only, bounded, symlink-safe) for the runtime
 /// secret-exfiltration fingerprint.
-fn scan_source_exfil(crate_dir: &Path) -> Option<(ExfilScan, PathBuf)> {
+fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
     use crate::safety::{MAX_DIR_DEPTH, MAX_DIR_ENTRIES, MAX_SOURCE_FILE_BYTES};
     let mut found = ExfilScan::default();
-    let mut sample: Option<PathBuf> = None;
     let mut stack: Vec<(PathBuf, usize)> = if crate_dir.join("src").is_dir() {
         vec![(crate_dir.join("src"), 0)]
     } else {
         vec![(crate_dir.to_path_buf(), 0)]
     };
     let mut visited = 0usize;
-    while let Some((dir, depth)) = stack.pop() {
+    'walk: while let Some((dir, depth)) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
         for entry in entries.flatten() {
             if visited >= MAX_DIR_ENTRIES {
-                break;
+                // Terminate the whole walk at the cap (not just this dir), matching
+                // count_unsafe — avoids a wasted read_dir per remaining stacked dir.
+                break 'walk;
             }
             visited += 1;
             let Ok(ft) = entry.file_type() else { continue };
@@ -839,23 +898,29 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<(ExfilScan, PathBuf)> {
                         && (c.contains("Command::new")
                             || c.contains("process::Command")
                             || c.contains("libc::system"));
-                    found.env_gated |= env_gated;
-                    if found.exfil_domain.is_none() {
-                        if let Some(d) = domain_here {
+                    if scans && found.scans_sample.is_none() {
+                        found.scans_sample = Some(path.clone());
+                    }
+                    if let Some(d) = domain_here {
+                        if found.exfil_domain.is_none() {
                             found.exfil_domain = Some((*d).to_string());
                         }
+                        if found.domain_sample.is_none() {
+                            found.domain_sample = Some(path.clone());
+                        }
                     }
-                    if (scans || domain_here.is_some() || env_gated) && sample.is_none() {
-                        sample = Some(path.clone());
+                    if env_gated && found.env_gated_sample.is_none() {
+                        found.env_gated_sample = Some(path.clone());
                     }
                     found.scans_source |= scans;
                     found.network |= net;
                     found.secrets |= sec;
+                    found.env_gated |= env_gated;
                 }
             }
         }
     }
-    sample.map(|s| (found, s))
+    found.any_match().then_some(found)
 }
 
 /// Build the `suspicious_source_exfil` signal if a crate's runtime source both
@@ -1130,6 +1195,7 @@ fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
             || signal.id == "possible_typosquat"
             || signal.id == "owners_changed"
             || signal.id == "source_substitution"
+            || signal.id == "denied_crate"
         {
             continue;
         }
@@ -1270,29 +1336,31 @@ fn collect_source_signals(
         }
 
         // Runtime secret-exfiltration fingerprint (faster_log/async_println class).
-        if let Some((scan, sample)) = scan_source_exfil(&crate_dir) {
-            if let Some(sig) = source_exfil_signal(
-                &package.id.to_string(),
-                &scan,
-                rel_display(source_root, &sample),
-            ) {
-                signals.push(sig);
+        // Each signal cites its OWN matching file (scan.*_sample), not one shared
+        // path — otherwise an env-gated payload in file B could be attributed to
+        // file A which merely held the exfil domain.
+        if let Some(scan) = scan_source_exfil(&crate_dir) {
+            if let Some(s) = &scan.scans_sample {
+                if let Some(sig) =
+                    source_exfil_signal(&package.id.to_string(), &scan, rel_display(source_root, s))
+                {
+                    signals.push(sig);
+                }
             }
             // Exfil-domain reputation: fires even when the crate does not read the
-            // project's `.rs` files (faster_log harvested *log* files), which the
-            // source-scan fingerprint alone would miss.
-            if let Some(domain) = scan.exfil_domain.as_deref() {
+            // project's `.rs` files (faster_log harvested *log* files).
+            if let (Some(domain), Some(s)) = (scan.exfil_domain.as_deref(), &scan.domain_sample) {
                 signals.push(exfil_domain_signal(
                     &package.id.to_string(),
                     domain,
-                    rel_display(source_root, &sample),
+                    rel_display(source_root, s),
                 ));
             }
             // Env-gated remote payload (rustdecimal, 2022): env var + network + spawn.
-            if scan.env_gated {
+            if let Some(s) = &scan.env_gated_sample {
                 signals.push(env_gated_payload_signal(
                     &package.id.to_string(),
-                    rel_display(source_root, &sample),
+                    rel_display(source_root, s),
                 ));
             }
         }
@@ -2043,7 +2111,7 @@ mod tests {
             network: false,
             secrets: false,
             exfil_domain: None,
-            env_gated: false,
+            ..Default::default()
         };
         assert!(source_exfil_signal("x@1", &only_scan, "lib.rs".into()).is_none());
         // network alone -> not enough (reqwest is a normal dependency).
@@ -2052,7 +2120,7 @@ mod tests {
             network: true,
             secrets: false,
             exfil_domain: None,
-            env_gated: false,
+            ..Default::default()
         };
         assert!(source_exfil_signal("x@1", &only_net, "lib.rs".into()).is_none());
         // scans source + secrets -> the malware fingerprint.
@@ -2061,7 +2129,7 @@ mod tests {
             network: false,
             secrets: true,
             exfil_domain: None,
-            env_gated: false,
+            ..Default::default()
         };
         let sig = source_exfil_signal("x@1", &bad, "lib.rs".into()).unwrap();
         assert_eq!(sig.id, "suspicious_source_exfil");

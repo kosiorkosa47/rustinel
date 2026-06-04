@@ -9,9 +9,10 @@
 //! - **No code execution.** The core never runs `build.rs`, never compiles, and
 //!   never spawns processes. (The CLI's `advisory update` shells out to `git`
 //!   with a fixed argument vector and no shell interpolation.)
-//! - **No attacker-controlled network.** Metadata lookups read the *local* Cargo
-//!   registry index; no request target is ever derived from analyzed data, which
-//!   removes SSRF as a class of bug.
+//! - **No attacker-controlled network.** The optional metadata lookup (in the
+//!   CLI) fetches the crates.io sparse index over HTTPS with a *fixed* host and a
+//!   validated crate-name path; no request target is ever derived from analyzed
+//!   data, which removes SSRF as a class of bug.
 //! - **Bounded I/O.** Every file read is size-capped; directory walks are depth-
 //!   and entry-bounded; symlinks are never followed during traversal.
 //! - **Validated identifiers.** Crate names/versions are validated before they
@@ -26,8 +27,6 @@ use std::path::{Component, Path};
 pub const MAX_SOURCE_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// Maximum bytes read from a single advisory document.
 pub const MAX_ADVISORY_FILE_BYTES: u64 = 1024 * 1024;
-/// Maximum bytes read from a single registry index entry.
-pub const MAX_INDEX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// Maximum directory recursion depth for any walk.
 pub const MAX_DIR_DEPTH: usize = 32;
 /// Maximum number of filesystem entries visited in a single walk.
@@ -106,10 +105,13 @@ pub fn read_file_capped(path: &Path, max_bytes: u64) -> Option<String> {
     if meta.len() > max_bytes {
         return None;
     }
-    let mut buf = String::new();
+    let mut bytes = Vec::new();
     // `take` bounds the read regardless of fstat (defense against TOCTOU growth).
-    file.take(max_bytes).read_to_string(&mut buf).ok()?;
-    Some(buf)
+    file.take(max_bytes).read_to_end(&mut bytes).ok()?;
+    // Decode lossily: the scanners do ASCII substring matching, so a single
+    // non-UTF-8 byte must not drop a whole source file from analysis (that would
+    // be a trivial evasion gap). TOML callers still fail to parse malformed input.
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 #[cfg(test)]
@@ -182,6 +184,21 @@ mod tests {
         std::fs::write(&path, vec![b'a'; 1024]).unwrap();
         assert!(read_file_capped(&path, 4096).is_some());
         assert!(read_file_capped(&path, 512).is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn read_cap_decodes_non_utf8_lossily() {
+        // A single non-UTF-8 byte must NOT drop the whole file (an evasion gap) —
+        // the ASCII fingerprints the scanners look for must still survive.
+        let dir = std::env::temp_dir();
+        let path = dir.join("rustinel_safety_nonutf8.rs");
+        let mut bytes = b"fn x(){ reqwest::get(\"https://x.workers.dev\");".to_vec();
+        bytes.push(0xFF);
+        bytes.extend_from_slice(b" }");
+        std::fs::write(&path, &bytes).unwrap();
+        let got = read_file_capped(&path, 4096).expect("file must not be dropped");
+        assert!(got.contains(".workers.dev"));
         let _ = std::fs::remove_file(&path);
     }
 }

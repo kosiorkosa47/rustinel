@@ -5,7 +5,9 @@ use std::path::PathBuf;
 /// Messages are written to be human-readable; the CLI surfaces them directly.
 #[derive(Debug, thiserror::Error)]
 pub enum RustinelError {
-    #[error("I/O error while reading {path}: {source}")]
+    // `#[source]` already exposes the io::Error as the next link in the error
+    // chain; don't also interpolate it into the message (that double-prints it).
+    #[error("I/O error while reading {path}")]
     Io {
         path: PathBuf,
         #[source]
@@ -20,12 +22,6 @@ pub enum RustinelError {
 
     #[error("Could not load advisory database at {path}: {message}")]
     AdvisoryDb { path: PathBuf, message: String },
-
-    #[error("Network error: {0}")]
-    Network(String),
-
-    #[error("Internal error: {0}")]
-    Internal(String),
 }
 
 impl RustinelError {

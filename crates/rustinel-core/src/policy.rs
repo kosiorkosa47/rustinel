@@ -43,11 +43,9 @@ pub struct AdvisoriesPolicy {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SignalsPolicy {
     pub fail_on_yanked: Option<bool>,
-    pub warn_on_yanked: Option<bool>,
     pub warn_on_build_rs: Option<bool>,
     pub require_review_on_build_rs: Option<bool>,
     pub require_review_on_native_ffi: Option<bool>,
-    pub warn_on_unsafe_increase: Option<bool>,
     pub fail_on_denied_license: Option<bool>,
     pub warn_on_unknown_license: Option<bool>,
     pub fail_on_unknown_license: Option<bool>,
@@ -122,7 +120,6 @@ struct Effective {
     license_allow: Vec<String>,
     license_deny: Vec<String>,
     allow_crates: Vec<String>,
-    deny_crates: Vec<String>,
 }
 
 impl Effective {
@@ -188,9 +185,6 @@ impl Effective {
         if let Some(a) = &policy.allow {
             eff.allow_crates = a.crates.clone();
         }
-        if let Some(d) = &policy.deny {
-            eff.deny_crates = d.crates.clone();
-        }
         eff
     }
 
@@ -217,7 +211,6 @@ impl Effective {
             license_allow: vec![],
             license_deny: vec!["GPL-3.0".into(), "AGPL-3.0".into()],
             allow_crates: vec![],
-            deny_crates: vec![],
         };
         match profile {
             "strict" => Self {
@@ -300,12 +293,6 @@ pub fn evaluate(
         let crate_name = crate_name_of(&signal.package);
         let allowlisted = eff.allow_crates.iter().any(|c| c == crate_name);
 
-        if eff.deny_crates.iter().any(|c| c == crate_name) {
-            violations.push(format!(
-                "dependency `{crate_name}` is on the policy deny list"
-            ));
-        }
-
         if signal.id.starts_with("advisory_") {
             let advisory_id = signal.id.trim_start_matches("advisory_");
             if eff.adv_ignore.iter().any(|i| i == advisory_id) {
@@ -387,7 +374,9 @@ pub fn evaluate(
                 }
             }
             "native_ffi_detected" => {
-                if eff.require_review_on_native_ffi && !allowlisted {
+                if allowlisted {
+                    // explicitly trusted via allow.crates — emit nothing
+                } else if eff.require_review_on_native_ffi {
                     review_items.push(format!("`{}` is a native/FFI dependency", signal.package));
                 } else {
                     warnings.push(format!("`{}` is a native/FFI dependency", signal.package));
@@ -427,11 +416,21 @@ pub fn evaluate(
                 }
             }
             "yanked_crate" => {
-                if eff.fail_on_yanked && !allowlisted {
+                if allowlisted {
+                    // explicitly trusted via allow.crates — emit nothing
+                } else if eff.fail_on_yanked {
                     violations.push(format!("`{}` is yanked", signal.package));
                 } else {
                     warnings.push(format!("`{}` is yanked", signal.package));
                 }
+            }
+            // Explicit deny-list match: an operator's strongest control. Always a
+            // violation; the allowlist does not override an explicit deny.
+            "denied_crate" => {
+                violations.push(format!(
+                    "dependency `{}` is on the policy deny list",
+                    crate_name_of(&signal.package)
+                ));
             }
             // Env-gated download-and-execute (the rustdecimal pattern): a
             // malware-class source signal — strict fails, otherwise demands review.
@@ -762,6 +761,49 @@ mod tests {
         };
         let d = evaluate(&risk(20, 20), std::slice::from_ref(&sig), None, None).unwrap();
         assert_eq!(d.decision, Decision::ReviewRequired);
+    }
+
+    #[test]
+    fn allowlisted_native_ffi_is_silent() {
+        // An explicit allow.crates entry must silence the native/FFI signal — it
+        // is exactly the situation an operator allowlists for (e.g. openssl-sys).
+        let sig = RiskSignal {
+            id: "native_ffi_detected".into(),
+            package: "openssl-sys@0.9.99".into(),
+            severity: Severity::High,
+            weight: 20,
+            confidence: 0.9,
+            evidence: vec![],
+            recommendation: String::new(),
+        };
+        let policy = parse_policy_toml("[allow]\ncrates = [\"openssl-sys\"]\n").unwrap();
+        let d = evaluate(
+            &risk(20, 20),
+            std::slice::from_ref(&sig),
+            None,
+            Some(&policy),
+        )
+        .unwrap();
+        assert_eq!(d.decision, Decision::Pass);
+        assert!(d.warnings.is_empty() && d.review_items.is_empty());
+    }
+
+    #[test]
+    fn denied_crate_signal_fails_and_allowlist_does_not_override() {
+        let sig = RiskSignal {
+            id: "denied_crate".into(),
+            package: "foo@1.0.0".into(),
+            severity: Severity::High,
+            weight: 0,
+            confidence: 1.0,
+            evidence: vec![],
+            recommendation: String::new(),
+        };
+        // Even when also allowlisted, an explicit deny wins.
+        let policy = parse_policy_toml("[allow]\ncrates = [\"foo\"]\n").unwrap();
+        let d = evaluate(&risk(0, 0), std::slice::from_ref(&sig), None, Some(&policy)).unwrap();
+        assert_eq!(d.decision, Decision::Fail);
+        assert!(d.violations.iter().any(|v| v.contains("deny list")));
     }
 
     #[test]

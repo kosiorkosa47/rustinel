@@ -94,7 +94,14 @@ impl AnalysisOptions {
 
     fn load_advisories(&self) -> Result<advisory::AdvisoryDb, RustinelError> {
         if let Some(path) = &self.advisory_db_path {
-            return advisory::AdvisoryDb::load_from_dir(path);
+            let result = advisory::AdvisoryDb::load_from_dir(path);
+            // `--offline` must never hard-fail (documented invariant): degrade an
+            // unreadable explicit DB to an empty one rather than erroring.
+            return if self.offline {
+                Ok(result.unwrap_or_else(|_| advisory::AdvisoryDb::empty()))
+            } else {
+                result
+            };
         }
         if self.offline {
             // Offline with no explicit DB: use the default cache if it happens to
@@ -239,5 +246,25 @@ mod tests {
         };
         let report = analyze_lockfile(&lock, options).unwrap();
         assert!(report.analysis.offline);
+    }
+
+    #[test]
+    fn offline_with_unreadable_explicit_db_does_not_fail() {
+        // An explicit advisory-db path that exists but is not a readable directory
+        // must degrade to an empty DB under --offline, never hard-fail (invariant).
+        let file = std::env::temp_dir().join("rustinel_not_a_dir_marker.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let lock = fixtures().join("safe_project/Cargo.lock");
+        let options = AnalysisOptions {
+            offline: true,
+            advisory_db_path: Some(file.clone()),
+            ..Default::default()
+        };
+        let report = analyze_lockfile(&lock, options);
+        let _ = std::fs::remove_file(&file);
+        assert!(
+            report.is_ok(),
+            "offline must not hard-fail on an unreadable explicit DB"
+        );
     }
 }
