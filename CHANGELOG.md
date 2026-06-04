@@ -28,6 +28,29 @@ All notable changes to rustinel are documented here. Format follows
   and MSRV job.
 - **`cargo rustinel demo`** — animated splash banner.
 
+### Added — proactive, pre-advisory signals
+
+The risk an advisory-database scanner cannot produce, because it exists *before*
+any advisory is filed. See [`docs/PROACTIVE-DETECTION.md`](docs/PROACTIVE-DETECTION.md).
+
+- **Ownership-change** detection against a committed trust baseline
+  (`rustinel-trust.toml`) — the maintainer-takeover vector behind xz
+  (CVE-2024-3094) and event-stream.
+- **Freshness** — flags dependencies published within the last 14 days
+  ("new == unreviewed").
+- **`suspicious_exfil_domain`** — data-exfiltration endpoints (Cloudflare
+  Workers, Telegram, webhook / paste services) hard-coded in a dependency's
+  source; catches the faster_log crypto-stealer (Sept 2025) statically, which an
+  advisory scanner and a build-time sandbox both miss.
+- **`env_gated_payload`** — env-gated download-and-execute in source (the
+  rustdecimal pattern, 2022).
+- Crypto-stealer detection hardened with key-format literals (base58 alphabet,
+  Ethereum private-key regex) that survive keyword obfuscation.
+- Online metadata corroborates the typosquat heuristic via crates.io download
+  counts; the PR comment separates **Known advisories** (cargo-audit parity)
+  from **Proactive signals**.
+- Dogfood CI: rustinel reviews its own supply chain on every pull request.
+
 ### Security
 
 - Core is network- and process-free; all I/O with the world lives in the CLI.
