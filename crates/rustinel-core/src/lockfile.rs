@@ -82,6 +82,31 @@ pub fn parse_lockfile(path: &Path) -> Result<LockfileModel, RustinelError> {
     parse_lockfile_str(path.to_path_buf(), &content)
 }
 
+/// Parse a `Cargo.lock` via the `cargo-lock` crate, converting both its `Err`
+/// and any **panic** it raises on malformed input into a clean error string.
+///
+/// `cargo-lock` v11 panics on some hostile lockfiles — e.g. a `checksum` that is
+/// 64 *bytes* but not 64 ASCII chars makes it byte-slice across a UTF-8 char
+/// boundary (`checksum.rs:48`, found by the fuzz harness). rustinel parses
+/// untrusted lockfiles, so a dependency panic must never crash us. Only the
+/// `cargo-lock` call is wrapped in `catch_unwind` (our own mapping code stays
+/// outside the closure, so genuine bugs there remain observable), and the panic
+/// hook is silenced for the duration so the output stays clean. Lockfile parsing
+/// is single-threaded, so the temporary global hook swap cannot race another
+/// thread's panic.
+fn parse_cargo_lock(content: &str) -> Result<cargo_lock::Lockfile, String> {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = catch_unwind(AssertUnwindSafe(|| content.parse::<cargo_lock::Lockfile>()));
+    std::panic::set_hook(prev);
+    match result {
+        Ok(Ok(lockfile)) => Ok(lockfile),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("the lockfile parser rejected this input (guarded panic)".to_string()),
+    }
+}
+
 /// Parse a `Cargo.lock` from an in-memory string.
 ///
 /// Backed by the upstream [`cargo_lock`] crate so the full lockfile grammar
@@ -89,13 +114,13 @@ pub fn parse_lockfile(path: &Path) -> Result<LockfileModel, RustinelError> {
 /// correctly. We map its model into our own [`LockfileModel`] so the rest of the
 /// analysis is decoupled from the parser implementation. The top-level
 /// `version = N` field is read separately because it is the lockfile's *format*
-/// version, which we surface verbatim.
+/// version, which we surface verbatim. Parsing is panic-guarded (see
+/// [`parse_cargo_lock`]) because the input is untrusted.
 pub fn parse_lockfile_str(path: PathBuf, content: &str) -> Result<LockfileModel, RustinelError> {
     let version = extract_top_version(content);
 
-    let parsed: cargo_lock::Lockfile = content.parse().map_err(|e: cargo_lock::Error| {
-        RustinelError::lockfile_parse(path.clone(), e.to_string())
-    })?;
+    let parsed: cargo_lock::Lockfile = parse_cargo_lock(content)
+        .map_err(|msg| RustinelError::lockfile_parse(path.clone(), msg))?;
 
     let mut packages: Vec<Package> = parsed
         .packages
@@ -292,5 +317,30 @@ checksum = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         let model = parse_lockfile_str(PathBuf::from("Cargo.lock"), input).unwrap();
         assert_eq!(model.packages[0].id.name, "aaa");
         assert_eq!(model.packages[1].id.name, "zzz");
+    }
+
+    #[test]
+    fn malformed_utf8_checksum_does_not_panic() {
+        // Regression for a panic the fuzz harness found in cargo-lock v11: a
+        // `checksum` that is 64 *bytes* but contains a 2-byte UTF-8 char at an odd
+        // byte offset makes cargo-lock byte-slice across a char boundary and
+        // panic (`checksum.rs:48`). rustinel parses untrusted lockfiles, so this
+        // must surface as a clean Err — never a panic that crashes the process.
+        let bad = format!("{}\u{021C}{}", "a".repeat(61), "a"); // 61 + 2 + 1 = 64 bytes
+        assert_eq!(
+            bad.len(),
+            64,
+            "must be 64 bytes to pass cargo-lock's length gate"
+        );
+        let input = format!(
+            "version = 3\n\n[[package]]\nname = \"x\"\nversion = \"1.0.0\"\n\
+             source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+             checksum = \"{bad}\"\n"
+        );
+        let r = parse_lockfile_str(PathBuf::from("Cargo.lock"), &input);
+        assert!(
+            r.is_err(),
+            "a malformed-checksum lockfile must be a clean Err, not a panic"
+        );
     }
 }
