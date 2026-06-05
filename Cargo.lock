@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-rustinel"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "rustinel-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cargo-lock",
  "chrono",

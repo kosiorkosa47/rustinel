@@ -1,6 +1,6 @@
 [package]
 name = "cargo-rustinel"
-version = "0.1.0"
+version = "0.1.1"
 description = "Supply-chain risk diff CLI for Rust projects. Invoked as `cargo rustinel`."
 edition.workspace = true
 license.workspace = true
@@ -35,7 +35,7 @@ serde.workspace = true
 toml.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
-rustinel-core = { path = "../rustinel-core", version = "0.1.0" }
+rustinel-core = { path = "../rustinel-core", version = "0.1.1" }
 # HTTPS client for the (opt-in) crates.io sparse-index metadata lookup.
 # rustls TLS only; used solely against the fixed host `index.crates.io`.
 ureq = { version = "2", default-features = false, features = ["tls", "gzip"], optional = true }

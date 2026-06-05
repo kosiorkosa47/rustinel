@@ -6,6 +6,16 @@ All notable changes to rustinel are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-06-05
+
+### Fixed
+
+- **Never panic on a malformed `Cargo.lock`.** The `cargo-lock` parser is now
+  panic-guarded: a hostile lockfile (e.g. a `checksum` that is 64 bytes but not
+  64 ASCII characters) now surfaces a clean parse error instead of crashing the
+  process. Found by the nightly fuzz harness; reproduced via `cargo rustinel
+  check` and verified against the live fuzz target.
+
 ## [0.1.0] — 2026-06-04
 
 First public release.

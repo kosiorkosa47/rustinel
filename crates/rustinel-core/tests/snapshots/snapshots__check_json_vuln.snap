@@ -6,7 +6,7 @@ expression: json
   "schema_version": "1.0",
   "tool": {
     "name": "rustinel",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "analysis": {
     "mode": "check",

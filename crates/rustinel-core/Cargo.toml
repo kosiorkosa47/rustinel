@@ -1,6 +1,6 @@
 [package]
 name = "rustinel-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "Defensive Rust supply-chain risk analysis: static signals, policy and risk diff for Cargo lockfiles."
 edition.workspace = true
 license.workspace = true

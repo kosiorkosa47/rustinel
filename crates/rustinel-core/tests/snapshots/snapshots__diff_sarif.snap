@@ -10,7 +10,7 @@ expression: sarif
       "tool": {
         "driver": {
           "name": "rustinel",
-          "version": "0.1.0",
+          "version": "0.1.1",
           "informationUri": "https://github.com/kosiorkosa47/rustinel",
           "rules": [
             {
