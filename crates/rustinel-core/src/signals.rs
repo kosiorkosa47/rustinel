@@ -770,8 +770,10 @@ const BUILD_RS_PAYLOAD: &[&str] = &[
     "STANDARD.decode",
     "from_base64",
     "hex::decode",
-    "libloading",
-    "dlopen",
+    "libloading::",
+    // The call form, not a bare substring — otherwise a cargo feature or env-var
+    // name like `source-fontconfig-dlopen` / `RUST_FONTCONFIG_DLOPEN` trips it.
+    "dlopen(",
 ];
 
 /// Markers that a runtime source file *harvests secrets*: crypto-wallet / key
@@ -2414,6 +2416,23 @@ mod tests {
         let sig = build_script_intent_signal("sneaky@1.0.0", src, "build.rs".into()).unwrap();
         assert_eq!(sig.severity, Severity::Medium);
         assert!(sig.evidence.iter().any(|e| e.summary.contains("payload")));
+    }
+
+    #[test]
+    fn dlopen_in_a_feature_name_is_not_a_payload() {
+        // Regression: the `dlopen` marker matched the substring inside a cargo
+        // feature / env-var name (`source-fontconfig-dlopen`), flagging a 7-line
+        // build.rs that only forwards a cfg flag. The call form must be required.
+        let benign = "fn main(){\n  println!(\"cargo:rerun-if-env-changed=RUST_FONTCONFIG_DLOPEN\");\n  \
+                      if std::env::var(\"RUST_FONTCONFIG_DLOPEN\").is_ok() {\n    \
+                      println!(\"cargo:rustc-cfg=feature=\\\"source-fontconfig-dlopen\\\"\");\n  }\n}\n";
+        assert!(
+            build_script_intent_signal("font-kit@1.0.0", benign, "build.rs".into()).is_none(),
+            "a `*-dlopen` feature/env name must not be read as dynamic loading"
+        );
+        // A real FFI dynamic-load call is still flagged.
+        let real = "fn main(){ unsafe { let _ = libc::dlopen(p, 1); } }";
+        assert!(build_script_intent_signal("x@1.0.0", real, "build.rs".into()).is_some());
     }
 
     #[test]
