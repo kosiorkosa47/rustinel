@@ -5,11 +5,10 @@
 <h1 align="center">rustinel</h1>
 
 [![CI](https://github.com/kosiorkosa47/rustinel/actions/workflows/ci.yml/badge.svg)](https://github.com/kosiorkosa47/rustinel/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/cargo-rustinel.svg)](https://crates.io/crates/cargo-rustinel)
+[![docs.rs](https://img.shields.io/docsrs/rustinel-core)](https://docs.rs/rustinel-core)
 ![license](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)
 ![MSRV](https://img.shields.io/badge/MSRV-1.86-orange)
-<!-- enable after crates.io publish:
-[![crates.io](https://img.shields.io/crates/v/cargo-rustinel.svg)](https://crates.io/crates/cargo-rustinel)
-[![docs.rs](https://img.shields.io/docsrs/rustinel-core)](https://docs.rs/rustinel-core) -->
 
 **Defensive supply-chain risk diff for Rust projects.**
 *A pull-request firewall for Cargo dependencies.*
