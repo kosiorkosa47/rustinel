@@ -52,6 +52,21 @@ expression: sarif
           "level": "warning",
           "message": {
             "text": "openssl-sys@0.9.99: crate name ends with `-sys`, a convention for native/FFI bindings"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "rustinel/v1": "7b2c54e0345565de"
           }
         },
         {
@@ -59,6 +74,21 @@ expression: sarif
           "level": "note",
           "message": {
             "text": "openssl-sys@0.9.99: build.rs exists; the file was inspected statically and never executed"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "rustinel/v1": "8c3b38e27bf75e24"
           }
         },
         {
@@ -66,6 +96,21 @@ expression: sarif
           "level": "note",
           "message": {
             "text": "openssl-sys@0.9.99: declared license: MIT"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Cargo.lock"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "rustinel/v1": "4b8454acd3d341c0"
           }
         }
       ]

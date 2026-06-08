@@ -52,11 +52,60 @@ struct SarifResult {
     rule_id: String,
     level: String,
     message: SarifText,
+    /// Every result carries a location — GitHub code scanning drops results that
+    /// have none. Dependency findings have no source line, so they anchor to the
+    /// lockfile where the dependency is declared.
+    locations: Vec<SarifLocation>,
+    /// Stable, deterministic fingerprint so GitHub code scanning tracks the same
+    /// finding across runs (no alert churn) instead of recomputing from text.
+    #[serde(rename = "partialFingerprints")]
+    partial_fingerprints: BTreeMap<String, String>,
+}
+
+#[derive(Serialize)]
+struct SarifLocation {
+    #[serde(rename = "physicalLocation")]
+    physical_location: SarifPhysicalLocation,
+}
+
+#[derive(Serialize)]
+struct SarifPhysicalLocation {
+    #[serde(rename = "artifactLocation")]
+    artifact_location: SarifArtifactLocation,
+    region: SarifRegion,
+}
+
+#[derive(Serialize)]
+struct SarifArtifactLocation {
+    uri: String,
+}
+
+#[derive(Serialize)]
+struct SarifRegion {
+    #[serde(rename = "startLine")]
+    start_line: u32,
 }
 
 #[derive(Serialize)]
 struct SarifText {
     text: String,
+}
+
+/// The repo-root lockfile is the conventional location for dependency findings.
+/// (rustinel does not track per-package line numbers, so results anchor to the
+/// file rather than a specific line.)
+const LOCKFILE_URI: &str = "Cargo.lock";
+
+/// FNV-1a 64-bit, hex-encoded. Deterministic across platforms and versions — the
+/// `std` hashers are not guaranteed stable, which would break fingerprint
+/// continuity, so we hash explicitly.
+fn fnv1a_hex(s: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn level_for(severity: Severity) -> &'static str {
@@ -101,12 +150,28 @@ pub fn build(report: &RustinelReport) -> SarifLog {
                 .first()
                 .map(|e| flatten(&e.summary))
                 .unwrap_or_else(|| f.id.clone());
+            let mut fingerprints = BTreeMap::new();
+            // Keyed on rule + package so the same finding on the same package
+            // keeps one stable alert; the `/v1` namespace lets the scheme evolve.
+            fingerprints.insert(
+                "rustinel/v1".to_string(),
+                fnv1a_hex(&format!("{}\u{0}{}", f.id, f.package)),
+            );
             SarifResult {
                 rule_id: f.id.clone(),
                 level: level_for(f.severity).to_string(),
                 message: SarifText {
                     text: flatten(&format!("{}: {}", f.package, detail)),
                 },
+                locations: vec![SarifLocation {
+                    physical_location: SarifPhysicalLocation {
+                        artifact_location: SarifArtifactLocation {
+                            uri: LOCKFILE_URI.to_string(),
+                        },
+                        region: SarifRegion { start_line: 1 },
+                    },
+                }],
+                partial_fingerprints: fingerprints,
             }
         })
         .collect();

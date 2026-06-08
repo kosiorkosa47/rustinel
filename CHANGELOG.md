@@ -6,6 +6,14 @@ All notable changes to rustinel are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub code scanning integration.** The Action can now upload findings to the
+  repository's Security tab as SARIF code-scanning alerts (`code-scanning: "true"`,
+  needs `security-events: write`). SARIF results now carry a physical location
+  (anchored to `Cargo.lock`) and a stable `partialFingerprint`, so GitHub renders
+  each finding as a tracked alert that resolves when fixed instead of churning.
+
 ## [0.1.1] — 2026-06-05
 
 ### Fixed

@@ -63,3 +63,34 @@ fn snapshot_diff_sarif() {
     let sarif = report::render(&report, OutputFormat::Sarif).unwrap();
     insta::assert_snapshot!("diff_sarif", sarif);
 }
+
+/// GitHub code scanning drops SARIF results that have no location and re-creates
+/// alerts when fingerprints are missing. Every result must therefore carry a
+/// physical location (anchored to the lockfile) and a stable partialFingerprint.
+#[test]
+fn sarif_results_are_code_scanning_ready() {
+    let report = analyze_diff(
+        &fixtures().join("diff/base/Cargo.lock"),
+        &fixtures().join("diff/head/Cargo.lock"),
+        opts(Some(fixtures().join("mock_registry")), None),
+    )
+    .unwrap();
+    let sarif = report::render(&report, OutputFormat::Sarif).unwrap();
+
+    let results = sarif.matches("\"ruleId\"").count();
+    assert!(results > 0, "fixture must produce findings to test against");
+    // Exactly one physical location per result, all anchored to the lockfile.
+    assert_eq!(
+        sarif.matches("\"physicalLocation\"").count(),
+        results,
+        "every SARIF result must carry exactly one location"
+    );
+    assert_eq!(sarif.matches("\"artifactLocation\"").count(), results);
+    assert_eq!(
+        sarif.matches("\"partialFingerprints\"").count(),
+        results,
+        "every SARIF result must carry a stable fingerprint"
+    );
+    assert!(sarif.contains("\"uri\": \"Cargo.lock\""));
+    assert!(sarif.contains("\"rustinel/v1\""));
+}

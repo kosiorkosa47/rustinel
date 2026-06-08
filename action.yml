@@ -38,6 +38,10 @@ inputs:
     description: Post/update a sticky comment on the pull request
     required: false
     default: "true"
+  code-scanning:
+    description: "Upload findings to GitHub code scanning (Security tab) as a SARIF report. Requires the workflow to grant `security-events: write`."
+    required: false
+    default: "false"
   github-token:
     description: Token used to post the PR comment (needs pull-requests:write)
     required: false
@@ -47,6 +51,9 @@ outputs:
   report-path:
     description: Path to the generated Markdown report
     value: rustinel-report.md
+  sarif-path:
+    description: Path to the generated SARIF report (when code-scanning is enabled)
+    value: rustinel.sarif
 
 runs:
   using: composite
@@ -110,6 +117,28 @@ runs:
           gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$BODY" >/dev/null
           echo "Posted new rustinel comment."
         fi
+
+    - name: Generate SARIF for code scanning
+      if: ${{ inputs.code-scanning == 'true' }}
+      shell: bash
+      run: |
+        # Code-scanning alerts represent the *current* risk of the lockfile, so
+        # always emit a `check` SARIF (full findings) even in diff mode. Never
+        # fail the build on SARIF generation — it is a reporting side-channel.
+        LF="${{ inputs.lockfile }}"
+        [ "${{ inputs.command }}" = "diff" ] && LF="${{ inputs.head-lockfile }}"
+        ARGS=(rustinel check --lockfile "$LF" --format sarif --output rustinel.sarif --no-timestamp)
+        [ -n "${{ inputs.policy }}" ] && ARGS+=(--policy "${{ inputs.policy }}")
+        [ "${{ inputs.offline }}" = "true" ] && ARGS+=(--offline)
+        [ "${{ inputs.online-metadata }}" = "true" ] && ARGS+=(--online-metadata)
+        cargo "${ARGS[@]}" || true
+
+    - name: Upload SARIF to code scanning
+      if: ${{ inputs.code-scanning == 'true' && hashFiles('rustinel.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: rustinel.sarif
+        category: rustinel
 
     - name: Enforce policy decision
       shell: bash

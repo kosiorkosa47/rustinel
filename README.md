@@ -174,12 +174,14 @@ built-in profiles.
 ## GitHub Action
 
 Posts a **sticky PR comment** with the risk diff (created once, updated in place
-on each push) and fails the check on a policy violation:
+on each push), fails the check on a policy violation, and can optionally upload
+findings to the repository's **Security tab** as code-scanning alerts:
 
 ```yaml
 permissions:
   contents: read
   pull-requests: write
+  # security-events: write   # only needed for code-scanning: "true"
 jobs:
   supply-chain:
     runs-on: ubuntu-latest
@@ -195,6 +197,7 @@ jobs:
           head-lockfile: Cargo.lock
           policy: rustinel.toml
           online-metadata: "true"
+          # code-scanning: "true"   # also upload findings to the Security tab
 ```
 
 See `action.yml` and `examples/github-action.yml`.
