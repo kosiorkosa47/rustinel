@@ -76,6 +76,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      security-events: write # upload our own SARIF to code scanning (dogfood)
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -90,6 +91,18 @@ jobs:
             --lockfile Cargo.lock \
             --format markdown \
             --output rustinel-report.md --no-timestamp || true
+      - name: Generate SARIF
+        run: |
+          ./target/release/cargo-rustinel rustinel check \
+            --lockfile Cargo.lock \
+            --format sarif \
+            --output rustinel.sarif --no-timestamp || true
+      - name: Upload SARIF to code scanning
+        if: hashFiles('rustinel.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: rustinel.sarif
+          category: rustinel
       - name: Post sticky PR comment
         if: ${{ github.event_name == 'pull_request' }}
         env:
