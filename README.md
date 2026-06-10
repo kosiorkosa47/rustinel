@@ -59,21 +59,27 @@ the dependencies it analyzes — see [Security model](#security-model).
 others: see [`docs/COMPARISON.md`](docs/COMPARISON.md). Short version: rustinel
 fills the unfilled **PR-centric risk-diff** niche and composes with the rest.
 
+**Proven precise.** A heuristic scanner is only useful if it doesn't cry wolf.
+Benchmarked over **966 real crates** (real dependency closures + freshly-published
+crates.io uploads): **zero false positives** from the malware-class signals —
+while still catching the real attack shapes, and correctly flagging three crates
+whose `build.rs` downloads code at build time. Full methodology + a reproducible
+script: [`docs/DATA-STUDY.md`](docs/DATA-STUDY.md).
+
 ## Install
 
 **MSRV: Rust 1.86** (set by the dependency tree; the network-free `--no-default-features` build needs less).
 
 ```bash
-# Prebuilt binary (once releases are published):
-cargo binstall cargo-rustinel
+# From crates.io — installs the `cargo-rustinel` binary, usable as `cargo rustinel ...`
+cargo install cargo-rustinel
 
-# Or from source:
-cargo install --path crates/rustinel-cli
-# installs the `cargo-rustinel` binary, usable as `cargo rustinel ...`
+# Or a prebuilt binary (no compile), via cargo-binstall:
+cargo binstall cargo-rustinel
 
 # Security-minimal build with zero network dependencies (no HTTPS client).
 # `--online-metadata` becomes a no-op; everything else is unchanged.
-cargo install --path crates/rustinel-cli --no-default-features
+cargo install cargo-rustinel --no-default-features
 ```
 
 ## Usage
