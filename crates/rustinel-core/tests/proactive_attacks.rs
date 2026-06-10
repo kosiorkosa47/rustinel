@@ -252,12 +252,17 @@ fn benign_http_client_trips_no_malice_signals() {
     };
     let report = analyze_lockfile(&lock, options).unwrap();
 
-    for pkg in ["legit-api-client@0.1.0", "benign-codegen@0.1.0"] {
+    for pkg in [
+        "legit-api-client@0.1.0",
+        "benign-codegen@0.1.0",
+        "embedded-cert@0.1.0",
+    ] {
         for id in [
             "suspicious_exfil_domain",
             "env_gated_payload",
             "suspicious_source_exfil",
             "source_substitution",
+            "obfuscated_payload",
         ] {
             assert!(
                 !report
@@ -268,4 +273,29 @@ fn benign_http_client_trips_no_malice_signals() {
             );
         }
     }
+}
+
+/// **Embedded encoded payload.** A crate that decodes a large base64 blob and
+/// then executes it ships its malware *inside* the crate — no network, so it
+/// evades download-based detection. rustinel flags it from a static read; the
+/// benign `embedded-cert` (blob decoded into data, never run) is the negative
+/// control above.
+#[test]
+fn obfuscated_payload_flagged_statically() {
+    let lock = fixtures().join("attacks/obfuscated/Cargo.lock");
+    let options = AnalysisOptions {
+        offline: true,
+        advisory_db_path: Some(PathBuf::from("/nonexistent-rustinel-proactive-test-db")),
+        source_path: Some(fixtures().join("mock_registry")),
+        ..Default::default()
+    };
+    let report = analyze_lockfile(&lock, options).unwrap();
+
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.id == "obfuscated_payload" && f.package == "obfuscated-payload@0.1.0"),
+        "a decoded-and-executed embedded blob must be flagged",
+    );
 }

@@ -1,0 +1,9 @@
+// Fixture only — the embedded-encoded-payload obfuscation shape: a large base64
+// blob, decoded at runtime, then written out and executed. Inert (no real logic).
+// rustinel reads this statically and MUST NEVER execute it.
+pub fn run() {
+    const BLOB: &str = "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB";
+    let bytes = base64::decode(BLOB).unwrap();
+    let _ = std::fs::write("/tmp/payload", &bytes);
+    let _ = std::process::Command::new("/tmp/payload").status();
+}

@@ -1,0 +1,14 @@
+# Embedded-encoded-payload obfuscation: a crate that decodes a large base64 blob
+# and executes it. rustinel must flag `obfuscated_payload` (source read statically).
+version = 3
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = ["obfuscated-payload"]
+
+[[package]]
+name = "obfuscated-payload"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"

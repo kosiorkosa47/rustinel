@@ -875,6 +875,62 @@ fn env_gated_block(content: &str) -> bool {
     false
 }
 
+/// Minimum length of a contiguous base64/hex run for it to count as an embedded
+/// *blob* rather than incidental text. Normal Rust source breaks identifiers with
+/// `_`, `.`, spaces, and punctuation long before this — only a string-literal
+/// blob produces an unbroken run this long.
+const ENCODED_BLOB_MIN: usize = 256;
+
+/// Calls that turn an encoded blob back into raw bytes.
+const DECODE_MARKERS: &[&str] = &[
+    "base64::decode",
+    "STANDARD.decode",
+    "from_base64",
+    "base64_decode",
+    "hex::decode",
+    "general_purpose",
+];
+
+/// Sinks that *run* bytes: a process spawn or a dynamic library load. Decoding a
+/// blob then feeding it to one of these is the self-contained embedded-payload
+/// shape; decoding a blob into data (a cert, a key, a fixture) does not.
+const EXEC_SINK_MARKERS: &[&str] = &[
+    "Command::new",
+    "process::Command",
+    "libc::system",
+    "dlopen(",
+    "libloading::",
+];
+
+/// Longest contiguous run of base64-alphabet bytes (`[A-Za-z0-9+/=]`, a superset
+/// of hex). A long unbroken run is a string-literal blob, not code.
+fn longest_base64_run(content: &str) -> usize {
+    let (mut best, mut cur) = (0usize, 0usize);
+    for b in content.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=' {
+            cur += 1;
+            if cur > best {
+                best = cur;
+            }
+        } else {
+            cur = 0;
+        }
+    }
+    best
+}
+
+/// The embedded-encoded-payload obfuscation shape: a large encoded blob, a decode
+/// call, and an execution sink — all in one file. The exec-sink is the
+/// discriminator that separates a *hidden runnable payload* from a legitimately
+/// embedded-and-decoded cert/key/test-fixture (which is decoded into data, never
+/// run). Unlike `env_gated_payload`, no network is needed — the payload ships
+/// inside the crate, which is exactly how it evades network-based detection.
+fn looks_obfuscated_payload(content: &str) -> bool {
+    longest_base64_run(content) >= ENCODED_BLOB_MIN
+        && DECODE_MARKERS.iter().any(|m| content.contains(m))
+        && EXEC_SINK_MARKERS.iter().any(|m| content.contains(m))
+}
+
 #[derive(Default)]
 struct ExfilScan {
     exfil_domain: Option<String>,
@@ -889,6 +945,8 @@ struct ExfilScan {
     source_exfil_sample: Option<PathBuf>,
     source_exfil_network: bool,
     source_exfil_secrets: bool,
+    /// First file matching the embedded-encoded-payload obfuscation shape.
+    obfuscation_sample: Option<PathBuf>,
 }
 
 impl ExfilScan {
@@ -896,6 +954,7 @@ impl ExfilScan {
         self.source_exfil_sample.is_some()
             || self.domain_sample.is_some()
             || self.env_gated_sample.is_some()
+            || self.obfuscation_sample.is_some()
     }
 }
 
@@ -996,6 +1055,9 @@ fn scan_source_exfil(crate_dir: &Path) -> Option<ExfilScan> {
                     if env_gated && found.env_gated_sample.is_none() {
                         found.env_gated_sample = Some(path.clone());
                     }
+                    if found.obfuscation_sample.is_none() && looks_obfuscated_payload(&c) {
+                        found.obfuscation_sample = Some(path.clone());
+                    }
                 }
             }
         }
@@ -1087,6 +1149,28 @@ fn env_gated_payload_signal(package: &str, path: String) -> RiskSignal {
             "A dependency that gates a download-and-execute on an environment variable (e.g. a CI \
              flag) is the rustdecimal supply-chain pattern. Review this code before building; \
              report it if it is not yours."
+                .into(),
+    }
+}
+
+fn obfuscated_payload_signal(package: &str, path: String) -> RiskSignal {
+    RiskSignal {
+        id: "obfuscated_payload".into(),
+        package: package.to_string(),
+        severity: Severity::High,
+        weight: 26,
+        confidence: 0.55,
+        evidence: vec![Evidence::with_path(
+            "source",
+            path,
+            "source embeds a large encoded blob, decodes it, and feeds the result to a process \
+             spawn or dynamic library load — the hidden self-contained payload pattern (scanned \
+             statically, never executed)",
+        )],
+        recommendation:
+            "A dependency that decodes a large embedded blob and then runs it is almost certainly \
+             hiding a payload from review (and ships it inside the crate, so no network is needed). \
+             Do not build it; report it to the registry."
                 .into(),
     }
 }
@@ -1269,6 +1353,7 @@ fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
             || signal.id == "suspicious_source_exfil"
             || signal.id == "suspicious_exfil_domain"
             || signal.id == "env_gated_payload"
+            || signal.id == "obfuscated_payload"
             || signal.id == "possible_typosquat"
             || signal.id == "owners_changed"
             || signal.id == "source_substitution"
@@ -1437,6 +1522,13 @@ fn collect_source_signals(
             // Env-gated remote payload (rustdecimal, 2022): env var + network + spawn.
             if let Some(s) = &scan.env_gated_sample {
                 signals.push(env_gated_payload_signal(
+                    &package.id.to_string(),
+                    rel_display(source_root, s),
+                ));
+            }
+            // Embedded encoded payload: large blob + decode + execution sink.
+            if let Some(s) = &scan.obfuscation_sample {
+                signals.push(obfuscated_payload_signal(
                     &package.id.to_string(),
                     rel_display(source_root, s),
                 ));
@@ -2352,6 +2444,36 @@ mod tests {
             "a pure exfil host is suspicious on its own"
         );
         let _ = std::fs::remove_dir_all(&host);
+    }
+
+    #[test]
+    fn obfuscation_needs_blob_decode_and_exec_sink() {
+        let blob = "A".repeat(300); // a 300-char unbroken base64 run (>= ENCODED_BLOB_MIN)
+                                    // blob + decode + execution sink -> the hidden-payload shape.
+        let mal = format!(
+            "const B: &str = \"{blob}\";\nfn r() {{ let x = base64::decode(B).unwrap(); \
+             std::process::Command::new(\"/tmp/p\").status(); let _ = x; }}"
+        );
+        assert!(looks_obfuscated_payload(&mal));
+        // blob + decode but NO execution sink (a cert decoded into data) -> benign.
+        let cert = format!(
+            "const C: &str = \"{blob}\";\nfn c() -> Vec<u8> {{ base64::decode(C).unwrap() }}"
+        );
+        assert!(
+            !looks_obfuscated_payload(&cert),
+            "a decoded-into-data blob with no exec sink must not be flagged"
+        );
+        // decode + exec but NO large blob -> benign (small base64 is everywhere).
+        let small =
+            "fn r(){ let _=base64::decode(\"aGk=\"); std::process::Command::new(\"x\").status(); }";
+        assert!(!looks_obfuscated_payload(small));
+    }
+
+    #[test]
+    fn longest_base64_run_isolates_blobs() {
+        // Normal code is broken by spaces / `.` / `(` / `=` well before the threshold.
+        assert!(longest_base64_run("let x = foo.bar(baz).qux();") < 20);
+        assert_eq!(longest_base64_run(&"Z".repeat(400)), 400);
     }
 
     #[test]

@@ -4,6 +4,8 @@
 #  - legit-api-client : a plain HTTP client.
 #  - benign-codegen   : reads `.rs` files in one module, makes HTTP in another —
 #                       the two never coincide in one file (pass-4 regression).
+#  - embedded-cert    : decodes a base64 cert into data (no execution sink) —
+#                       blob + decode without running it must not be flagged.
 version = 3
 
 [[package]]
@@ -11,8 +13,15 @@ name = "app"
 version = "0.1.0"
 dependencies = [
  "benign-codegen",
+ "embedded-cert",
  "legit-api-client",
 ]
+
+[[package]]
+name = "embedded-cert"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3333333333333333333333333333333333333333333333333333333333333333"
 
 [[package]]
 name = "benign-codegen"

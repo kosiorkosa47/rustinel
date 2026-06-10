@@ -142,6 +142,7 @@ Exit code is driven by **policy only** (not by output format): `fail` → exit 1
 - **`unsafe`** usage (static count; informational, not a vulnerability by itself).
 - **Typosquatting** — dependency names one edit away (Damerau-Levenshtein) from a popular crate (`reqwset`→`reqwest`, `tokoi`→`tokio`), the impersonation vector behind recent malicious crates.
 - **Secret-exfil malware fingerprint** — runtime source that scans the project's own `.rs` files **and** reaches the network / handles wallet keys: the exact pattern of the Sept 2025 `faster_log`/`async_println` crypto-stealers (rustinel flags both via this **and** typosquatting).
+- **Embedded encoded payload** — source that decodes a large base64/hex blob **and** feeds the result to a process spawn or dynamic library load: a self-contained hidden payload that ships *inside* the crate (no network, so it evades download-based detection). A blob decoded into *data* — a cert, a key, a fixture — is **not** flagged; the execution sink is the discriminator.
 - **Multiple versions** of the same crate.
 - **License** detection / unknown-license / denied-license policy.
 - **Risk delta** between two lockfiles (added / removed / changed packages).

@@ -1,0 +1,5 @@
+[package]
+name = "obfuscated-payload"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture: an embedded encoded payload that is decoded and executed. rustinel reads it statically and must NEVER run it. Inert reconstruction of the obfuscation malware shape."

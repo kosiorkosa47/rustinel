@@ -8,6 +8,15 @@ All notable changes to rustinel are documented here. Format follows
 
 ### Added
 
+- **`obfuscated_payload` detector.** Flags a new malware shape: source that
+  embeds a large base64/hex blob, decodes it, **and** feeds the result to a
+  process spawn or dynamic library load — a self-contained hidden payload that
+  ships inside the crate (no network, so it evades download-based detection). A
+  blob decoded into *data* (a cert, a key, a fixture) is not flagged; the
+  execution sink is the discriminator. Verified at zero false positives across
+  500+ real crates.
+
+
 - **GitHub code scanning integration.** The Action can now upload findings to the
   repository's Security tab as SARIF code-scanning alerts (`code-scanning: "true"`,
   needs `security-events: write`). SARIF results now carry a physical location

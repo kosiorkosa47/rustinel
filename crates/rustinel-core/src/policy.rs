@@ -457,6 +457,21 @@ pub fn evaluate(
                     ));
                 }
             }
+            // Embedded encoded payload (blob + decode + execution sink): a
+            // malware-class source signal — strict fails, otherwise demands review.
+            "obfuscated_payload" => {
+                if eff.profile == "strict" && !allowlisted {
+                    violations.push(format!(
+                        "`{}` source decodes a large embedded blob and runs it",
+                        signal.package
+                    ));
+                } else {
+                    review_items.push(format!(
+                        "`{}` source decodes a large embedded blob and runs it",
+                        signal.package
+                    ));
+                }
+            }
             // A data-exfiltration domain hard-coded in source (the faster_log
             // pattern): malware-class — strict fails, otherwise demands review.
             "suspicious_exfil_domain" => {

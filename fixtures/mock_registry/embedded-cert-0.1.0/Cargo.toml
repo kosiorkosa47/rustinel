@@ -1,0 +1,5 @@
+[package]
+name = "embedded-cert"
+version = "0.1.0"
+edition = "2021"
+description = "Fixture: a benign crate that embeds a base64 certificate and decodes it into bytes (never executed). rustinel must NOT flag it as an obfuscated payload."
