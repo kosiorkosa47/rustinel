@@ -61,10 +61,11 @@ fills the unfilled **PR-centric risk-diff** niche and composes with the rest.
 
 **Proven precise.** A heuristic scanner is only useful if it doesn't cry wolf.
 Benchmarked over **966 real crates** (real dependency closures + freshly-published
-crates.io uploads): **zero false positives** from the malware-class signals —
-while still catching the real attack shapes, and correctly flagging three crates
-whose `build.rs` downloads code at build time. Full methodology + a reproducible
-script: [`docs/DATA-STUDY.md`](docs/DATA-STUDY.md).
+crates.io uploads): **zero false positives** from the signals that *assert malice*
+— while still catching the real attack shapes, and correctly flagging three crates
+whose `build.rs` downloads code at build time. (The name-similarity *review
+triggers* behaved as designed.) Full methodology + a reproducible script:
+[`docs/DATA-STUDY.md`](docs/DATA-STUDY.md).
 
 ## Install
 

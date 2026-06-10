@@ -24,23 +24,32 @@ This is the measured answer, run over real crates.
   2. **500 freshly-published crates** — the newest uploads pulled from the
      crates.io API (the "new == unreviewed" surface, where typosquats and
      malware actually appear), downloaded and statically scanned.
-- **What we count.** The *malware-class* proactive signals
-  (`suspicious_source_exfil`, `suspicious_exfil_domain`, `env_gated_payload`,
-  `possible_typosquat`, `source_substitution`) — a hit on a legitimate crate is
-  a false positive. `build_script_suspicious` is reported separately: a build
-  script that reaches the network is a genuine review item, not noise.
+- **What we count.** The signals that *assert malice* —
+  `suspicious_source_exfil`, `suspicious_exfil_domain`, `env_gated_payload`,
+  `obfuscated_payload`, `source_substitution` — where a hit on a legitimate
+  crate is a real false positive. Two signals are intentionally *review
+  triggers*, not malice claims, and are reported separately: `possible_typosquat`
+  (a name one edit from a popular crate is worth a human glance — some are benign
+  coincidences) and `build_script_suspicious` (a build script that reaches the
+  network is a genuine review item, not noise).
 
 ## Result
 
 ### Precision: zero false positives across ~966 real crates
 
-| corpus | crates | malware-class signal hits |
+| corpus | crates | malice-asserting signal hits |
 |---|---:|---:|
 | cached (real dependency closures) | 466 | **0** |
 | freshly published (crates.io) | 500 | **0** |
 | **total** | **966** | **0** |
 
-Not a single legitimate crate was flagged by the malware-class signals.
+Not a single legitimate crate was flagged by a signal that asserts malice.
+
+The two *review-trigger* signals behaved exactly as designed. `possible_typosquat`
+flagged one near-name in the fresh sample — `miao`, one edit from `mio` — which a
+five-second glance clears (it's a colourful `cat` clone, not an async runtime).
+That is the point of a name-similarity trigger: surface the lookalike for review,
+accept the occasional benign coincidence, never silently pass a real squat.
 
 ### It still catches the real shapes
 

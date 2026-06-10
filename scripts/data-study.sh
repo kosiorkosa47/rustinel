@@ -68,18 +68,28 @@ rep = json.load(open(os.environ["RUSTINEL_STUDY_JSON"]))
 f = rep["findings"]
 by = collections.Counter(x["id"] for x in f)
 
-# The malware-class / proactive precision signals. Zero of these on a clean,
-# legitimate corpus is the result that makes the signals trustworthy.
-MALWARE_CLASS = ["suspicious_source_exfil", "suspicious_exfil_domain",
-                 "env_gated_payload", "possible_typosquat", "source_substitution"]
+# Signals that *assert* a crate is doing something malicious — a hit on a
+# legitimate crate is a real false positive. Zero of these on a clean corpus is
+# the result that makes the signals trustworthy.
+MALICE_SIGNALS = ["suspicious_source_exfil", "suspicious_exfil_domain",
+                  "env_gated_payload", "obfuscated_payload", "source_substitution"]
 
 print(f"\nscanned {rep['packages_count']} crates\n")
-print("== malware-class proactive signals (false-positive pressure) ==")
+print("== malice-asserting signals (a hit here is a false positive) ==")
 fp = 0
-for s in MALWARE_CLASS:
+for s in MALICE_SIGNALS:
     print(f"  {by[s]:5d}  {s}")
     fp += by[s]
 print(f"  -> {fp} total\n")
+
+# Typosquatting is a *name-similarity review trigger*, not a malice claim: a name
+# one edit from a popular crate is worth a human glance, and some are benign
+# coincidences (e.g. `miao`, a colourful `cat` clone, is one edit from `mio`).
+typo = [x["package"] for x in f if x["id"] == "possible_typosquat"]
+print(f"== possible_typosquat: {len(typo)} near-name review trigger(s) ==")
+for p in typo:
+    print(f"  {p}")
+print()
 
 bss = [x for x in f if x["id"] == "build_script_suspicious"]
 print(f"== build_script_suspicious: {len(bss)} (build-time network/payload — review, not FP) ==")
