@@ -45,3 +45,12 @@ pub fn fuzz_typosquat(s: &str) {
         let _ = crate::signals::damerau_levenshtein(&s[..mid], &s[mid..]);
     }
 }
+
+/// The string-level source heuristics that run over untrusted crate source:
+/// the env-gated-payload proximity scan, the embedded-encoded-payload shape, and
+/// the base64-blob run length. They must never panic, hang, or over-read.
+pub fn fuzz_source_heuristics(s: &str) {
+    let _ = crate::signals::env_gated_block(s);
+    let _ = crate::signals::looks_obfuscated_payload(s);
+    let _ = crate::signals::longest_base64_run(s);
+}

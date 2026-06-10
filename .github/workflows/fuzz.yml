@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [lockfile, policy, unsafe_scan, build_intent, advisory, spdx, typosquat]
+        target: [lockfile, policy, unsafe_scan, build_intent, advisory, spdx, typosquat, source_heuristics]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

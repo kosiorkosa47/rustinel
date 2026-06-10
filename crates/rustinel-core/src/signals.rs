@@ -854,7 +854,7 @@ const DUAL_USE_EXFIL_DOMAINS: &[&str] = &[
 /// across thousands of lines does NOT match — that whole-file co-presence was a
 /// false positive (e.g. a tool that reads config from env, calls an RPC, and
 /// shells out to `cargo`, none of which are related).
-fn env_gated_block(content: &str) -> bool {
+pub(crate) fn env_gated_block(content: &str) -> bool {
     const WINDOW: usize = 25;
     const ENV: &[&str] = &["env::var", "var_os"];
     const SPAWN: &[&str] = &["Command::new", "process::Command", "libc::system"];
@@ -904,7 +904,7 @@ const EXEC_SINK_MARKERS: &[&str] = &[
 
 /// Longest contiguous run of base64-alphabet bytes (`[A-Za-z0-9+/=]`, a superset
 /// of hex). A long unbroken run is a string-literal blob, not code.
-fn longest_base64_run(content: &str) -> usize {
+pub(crate) fn longest_base64_run(content: &str) -> usize {
     let (mut best, mut cur) = (0usize, 0usize);
     for b in content.bytes() {
         if b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=' {
@@ -925,7 +925,7 @@ fn longest_base64_run(content: &str) -> usize {
 /// embedded-and-decoded cert/key/test-fixture (which is decoded into data, never
 /// run). Unlike `env_gated_payload`, no network is needed — the payload ships
 /// inside the crate, which is exactly how it evades network-based detection.
-fn looks_obfuscated_payload(content: &str) -> bool {
+pub(crate) fn looks_obfuscated_payload(content: &str) -> bool {
     longest_base64_run(content) >= ENCODED_BLOB_MIN
         && DECODE_MARKERS.iter().any(|m| content.contains(m))
         && EXEC_SINK_MARKERS.iter().any(|m| content.contains(m))

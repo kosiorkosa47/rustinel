@@ -12,7 +12,7 @@ the parsers on every `cargo test`. No nightly required.
 
 ## 2. Deep libFuzzer harness (nightly, AWS)
 
-`crates/rustinel-core/fuzz/` — seven coverage-guided targets over the
+`crates/rustinel-core/fuzz/` — eight coverage-guided targets over the
 edge-case-prone code:
 
 | Target | Exercises |
@@ -24,13 +24,14 @@ edge-case-prone code:
 | `advisory` | RustSec `.md` fenced-TOML / `.toml` extractor |
 | `spdx` | SPDX `AND`/`OR`/`WITH`/paren license evaluator |
 | `typosquat` | Damerau-Levenshtein edit distance (byte-sliced) |
+| `source_heuristics` | env-gated-payload, obfuscated-payload and base64-blob scanners |
 
 ### Turnkey AWS run
 
 ```bash
 # On a fresh Amazon Linux / Ubuntu box with rustup:
 git clone <repo> && cd rustinel
-TOTAL_SECONDS=14400 scripts/fuzz-aws.sh      # ~4h, split across the 7 targets
+TOTAL_SECONDS=14400 scripts/fuzz-aws.sh      # ~4h, split across the 8 targets
 ```
 
 The script installs nightly + cargo-fuzz, **seeds the corpus** from real

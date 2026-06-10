@@ -15,7 +15,7 @@ CORE_DIR="$REPO_ROOT/crates/rustinel-core"
 FUZZ_DIR="$CORE_DIR/fuzz"
 CORPUS_DIR="$FUZZ_DIR/corpus"
 
-TARGETS=(lockfile policy unsafe_scan build_intent advisory spdx typosquat)
+TARGETS=(lockfile policy unsafe_scan build_intent advisory spdx typosquat source_heuristics)
 TOTAL_SECONDS="${TOTAL_SECONDS:-14400}"          # default 4h
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}"
 PER_TARGET=$(( TOTAL_SECONDS / ${#TARGETS[@]} ))
