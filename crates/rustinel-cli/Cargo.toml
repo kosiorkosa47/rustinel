@@ -4,6 +4,7 @@ version = "0.1.1"
 description = "Supply-chain risk diff CLI for Rust projects. Invoked as `cargo rustinel`."
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 readme = "README.md"

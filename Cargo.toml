@@ -8,6 +8,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
+homepage = "https://rustinel.dev"
 repository = "https://github.com/kosiorkosa47/rustinel"
 # MSRV floor is set by our dependency tree, not by our own code:
 #   * clap 4.6 / cargo-lock 11 / indexmap 2.14 -> rustc 1.85 (+ edition-2024)
