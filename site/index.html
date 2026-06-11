@@ -12,188 +12,227 @@
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://raw.githubusercontent.com/kosiorkosa47/rustinel/main/assets/rustinel-logo.png">
 <meta name="twitter:card" content="summary">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e8590c'/%3E%3Cpath d='M10 23V9h7a5 5 0 0 1 2.4 9.4L23 23h-4.2l-3-4H13.6v4Zm3.6-7.4H17a1.6 1.6 0 1 0 0-3.2h-3.4Z' fill='%230a0c10'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23191b1f'/%3E%3Cpath d='M10 23V9h7a5 5 0 0 1 2.4 9.4L23 23h-4.2l-3-4H13.6v4Zm3.6-7.4H17a1.6 1.6 0 1 0 0-3.2h-3.4Z' fill='%23f7f6f2'/%3E%3C/svg%3E">
 <style>
 :root{
-  --bg:#0a0c10; --surface:#10131a; --surface-2:#151926; --border:#1f2430;
-  --text:#e7eaf0; --muted:#9aa3b2; --faint:#6b7484;
-  --accent:#f4622e; --accent-dim:#e8590c;
-  --ok:#4cc38a; --warn:#d9a73e; --bad:#e5604f;
-  --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
-  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --paper:#f7f6f2; --ink:#191b1f; --muted:#585f6b; --faint:#8a8f99;
+  --rule:#d9d6cc; --rule-soft:#e7e4db; --inset:#efede6;
+  --accent:#b3400f;
+  --term-bg:#17191e; --term-fg:#c9cdd6; --term-faint:#646b78;
+  --ok:#3f9665; --warn:#a07d1c; --bad:#bb4430;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
-a{color:var(--text);text-decoration:none}
-a:hover{color:var(--accent)}
-::selection{background:rgba(244,98,46,.35)}
-.wrap{max-width:1060px;margin:0 auto;padding:0 24px}
-section{padding:88px 0;border-top:1px solid var(--border)}
-.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
-h2{font-size:clamp(24px,3.4vw,34px);font-weight:650;letter-spacing:-.015em;line-height:1.2;margin-bottom:12px}
-.lede{color:var(--muted);max-width:46rem;margin-bottom:40px}
-.lede a{color:var(--text);border-bottom:1px solid var(--border)}
-.lede a:hover{color:var(--accent);border-color:var(--accent)}
-code{font-family:var(--mono);font-size:.92em}
-p code,li code{background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:.08em .35em}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6}
+a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px}
+a:hover{color:var(--accent);text-decoration-color:var(--accent)}
+::selection{background:#e9d7c9}
+code{font-family:var(--mono);font-size:.93em}
+p code,li code,td code,dt code{background:var(--inset);border:1px solid var(--rule-soft);padding:.05em .3em;border-radius:2px;white-space:nowrap}
+.page{max-width:1100px;margin:0 auto;padding:0 28px}
 
-/* nav */
-nav{position:sticky;top:0;z-index:10;background:rgba(10,12,16,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
-nav .wrap{display:flex;align-items:center;gap:28px;height:58px}
-.brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-weight:600;font-size:15px}
-.brand svg{flex:none}
-nav .links{display:flex;gap:22px;margin-left:auto;font-size:13.5px;color:var(--muted)}
-nav .links a{color:var(--muted)}
-nav .links a:hover{color:var(--text)}
-nav .gh{font-family:var(--mono);font-size:13px;border:1px solid var(--border);border-radius:6px;padding:5px 12px}
-@media(max-width:760px){nav .links{display:none}}
+/* ---- top rule + masthead ------------------------------------------------ */
+.topline{border-bottom:1px solid var(--ink)}
+.topline .page{display:flex;flex-wrap:wrap;align-items:baseline;gap:18px;padding:10px 28px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+@media(max-width:720px){.topline .tagline{display:none}}
+.topline .name{color:var(--ink);font-weight:600}
+.topline .right{margin-left:auto;display:flex;gap:18px}
+.topline a{text-decoration:none}
+.topline a:hover{text-decoration:underline}
 
-/* hero */
-header.hero{padding:104px 0 88px}
-.hero h1{font-size:clamp(32px,5.4vw,54px);font-weight:700;letter-spacing:-.025em;line-height:1.08;max-width:17ch}
-.hero h1 em{font-style:normal;color:var(--accent)}
-.hero .sub{color:var(--muted);font-size:clamp(16px,2vw,19px);max-width:42rem;margin:22px 0 36px}
-.install{display:flex;align-items:center;gap:0;max-width:520px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden}
-.install code{flex:1;padding:13px 16px;font-size:14px;color:var(--text);white-space:nowrap;overflow-x:auto}
-.install code .dollar{color:var(--faint);user-select:none}
-.copy{flex:none;font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--surface-2);border:0;border-left:1px solid var(--border);padding:13px 16px;cursor:pointer}
-.copy:hover{color:var(--text)}
-.hero .meta{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:22px;font-family:var(--mono);font-size:13px;color:var(--faint)}
-.hero .meta a{color:var(--muted);border-bottom:1px solid var(--border)}
-.hero .meta a:hover{color:var(--accent);border-color:var(--accent)}
+.masthead{padding:54px 0 0;border-bottom:1px solid var(--ink)}
+.masthead h1{font-size:clamp(30px,4.6vw,46px);font-weight:650;letter-spacing:-.02em;line-height:1.12;max-width:24ch}
+.masthead .sub{margin:18px 0 0;font-size:16.5px;color:var(--muted);max-width:62ch}
+.masthead .sub strong{color:var(--ink);font-weight:600}
+.specrow{display:flex;flex-wrap:wrap;margin-top:38px;border-top:1px solid var(--rule);font-family:var(--mono);font-size:12.5px}
+.specrow>div{padding:12px 28px 12px 0;margin-right:28px;border-right:1px solid var(--rule)}
+.specrow>div:last-child{border-right:0;margin-right:0}
+.specrow .k{color:var(--faint);display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
+.specrow a{text-decoration:none;border-bottom:1px solid var(--rule)}
+.installline{display:flex;align-items:center;gap:14px;padding:16px 0 18px;border-top:1px solid var(--rule);font-family:var(--mono);font-size:14px}
+.installline .prompt{color:var(--faint)}
+.installline button{font-family:var(--mono);font-size:11.5px;color:var(--muted);background:none;border:1px solid var(--rule);padding:3px 10px;cursor:pointer;border-radius:2px}
+.installline button:hover{border-color:var(--ink);color:var(--ink)}
 
-/* terminal */
-.term{background:#0c0e14;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-top:64px;box-shadow:0 24px 60px -32px rgba(0,0,0,.8)}
-.term .bar{display:flex;align-items:center;gap:6px;padding:11px 14px;border-bottom:1px solid var(--border)}
-.term .bar i{width:11px;height:11px;border-radius:50%;background:var(--border);display:inline-block}
-.term .bar span{margin-left:8px;font-family:var(--mono);font-size:12px;color:var(--faint)}
-.term pre{padding:20px 22px;font-family:var(--mono);font-size:13.5px;line-height:1.62;overflow-x:auto;color:#c6ccd8}
-.term .c{color:var(--faint)} .term .g{color:var(--ok)} .term .y{color:var(--warn)}
-.term .r{color:var(--bad)} .term .o{color:var(--accent)} .term .w{color:var(--text);font-weight:600}
-.caption{font-size:13px;color:var(--faint);margin-top:14px;max-width:46rem}
-.caption a{color:var(--muted);border-bottom:1px solid var(--border)}
+/* ---- layout: toc + body ------------------------------------------------- */
+.layout{display:grid;grid-template-columns:208px 1fr;gap:56px;padding-top:8px}
+/* Grid/flex children default to min-width:auto, so a wide <pre> would stretch
+   its track past the viewport instead of scrolling internally. */
+.layout>article,.twocol>*,.installcols>*,.compare>*{min-width:0}
+@media(max-width:880px){.layout{grid-template-columns:1fr}.toc{display:none}}
+.toc{position:sticky;top:0;align-self:start;padding-top:44px;font-family:var(--mono);font-size:12.5px}
+.toc ol{list-style:none}
+.toc li{border-bottom:1px solid var(--rule-soft)}
+.toc a{display:flex;gap:10px;padding:8px 2px;text-decoration:none;color:var(--muted)}
+.toc a:hover{color:var(--accent)}
+.toc .n{color:var(--faint)}
 
-/* the gap */
-.gap-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.gap-grid>div{background:var(--surface);padding:30px 30px 26px}
-.gap-grid h3{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--muted);margin-bottom:14px}
-.gap-grid h3.now{color:var(--accent)}
-.gap-grid ul{list-style:none}
-.gap-grid li{padding:7px 0;color:var(--muted);font-size:14.5px;border-top:1px solid var(--border)}
-.gap-grid li:first-child{border-top:0}
-.gap-grid li strong{color:var(--text);font-weight:550}
-@media(max-width:760px){.gap-grid{grid-template-columns:1fr}}
+article section{padding:44px 0 50px;border-bottom:1px solid var(--rule)}
+article section:last-of-type{border-bottom:0}
+.sechead{display:flex;align-items:baseline;gap:16px;margin-bottom:10px}
+.sechead .n{font-family:var(--mono);font-size:13px;color:var(--accent)}
+h2{font-size:21px;font-weight:650;letter-spacing:-.01em}
+.lede{color:var(--muted);max-width:68ch;margin:8px 0 26px}
+.lede a{color:var(--ink)}
+h3{font-size:15px;font-weight:650;margin:26px 0 8px}
 
-/* detector cards */
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px 22px 20px;transition:border-color .15s}
-.card:hover{border-color:#2c3445}
-.card h3{font-family:var(--mono);font-size:13.5px;font-weight:600;color:var(--accent);margin-bottom:8px}
-.card p{font-size:14px;color:var(--muted)}
-.card p strong{color:var(--text);font-weight:550}
-.card .tag{float:right;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border:1px solid var(--border);border-radius:99px;padding:2px 9px;margin:-1px 0 0 10px}
-.also{margin-top:36px;padding:22px 26px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:14px;color:var(--muted)}
-.also strong{color:var(--text);font-weight:550}
+/* ---- tables (the workhorse) --------------------------------------------- */
+table{width:100%;border-collapse:collapse;font-size:13.5px;border-top:2px solid var(--ink)}
+th,td{text-align:left;vertical-align:top;padding:10px 14px 10px 0;border-bottom:1px solid var(--rule)}
+thead th{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--ink);padding-top:8px;padding-bottom:8px}
+td.sig{font-family:var(--mono);font-size:12.5px;white-space:nowrap;color:var(--ink);font-weight:600}
+td.cls{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+td.inc{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
+td{color:#3c424c}
+td strong{color:var(--ink);font-weight:600}
+/* Narrow screens: drop the metadata columns entirely (both header and cells,
+   so columns never misalign) and let any residual table scroll internally
+   instead of stretching the page. */
+@media(max-width:720px){
+  td.cls,th.cls,td.inc{display:none}
+  table{display:block;overflow-x:auto}
+}
 
-/* proof */
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:44px}
-.stats>div{background:var(--surface);padding:28px 26px}
-.stats .n{font-family:var(--mono);font-size:clamp(24px,3vw,32px);font-weight:650;color:var(--text);letter-spacing:-.02em}
-.stats .n em{font-style:normal;color:var(--accent)}
-.stats .d{font-size:13px;color:var(--muted);margin-top:6px}
-@media(max-width:860px){.stats{grid-template-columns:1fr 1fr}}
-.recon{list-style:none;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.recon li{display:grid;grid-template-columns:200px 1fr auto;gap:18px;align-items:baseline;background:var(--surface);padding:16px 24px;border-top:1px solid var(--border);font-size:14.5px}
-.recon li:first-child{border-top:0}
-.recon .name{font-family:var(--mono);font-size:13.5px;color:var(--text);font-weight:600}
-.recon .what{color:var(--muted)}
-.recon .sig{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap}
-@media(max-width:760px){.recon li{grid-template-columns:1fr;gap:4px}.recon .sig{display:none}}
+/* ---- terminal / code insets --------------------------------------------- */
+pre.term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);font-size:13px;line-height:1.6;padding:20px 22px;overflow-x:auto;border-radius:3px;margin:18px 0 0}
+pre.term .c{color:var(--term-faint)} pre.term .g{color:#7fbf9a} pre.term .y{color:#cfa94c}
+pre.term .r{color:#d97f6f} pre.term .w{color:#eceff4;font-weight:600} pre.term .o{color:#e08a5a}
+.fig{font-size:12.5px;color:var(--faint);margin-top:10px;max-width:70ch}
+.fig b{color:var(--muted);font-weight:600}
+pre.conf{background:var(--inset);border:1px solid var(--rule);font-family:var(--mono);font-size:12.8px;line-height:1.6;padding:18px 20px;overflow-x:auto;border-radius:3px;color:#33383f}
+pre.conf .c{color:var(--faint)} pre.conf .o{color:var(--accent)}
 
-/* code blocks */
-.code{position:relative;background:#0c0e14;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.code .lbl{position:absolute;top:10px;right:14px;font-family:var(--mono);font-size:11px;color:var(--faint)}
-.code pre{padding:22px 24px;font-family:var(--mono);font-size:13.5px;line-height:1.62;overflow-x:auto;color:#c6ccd8}
-.code .k{color:#7aa2f7}.code .s{color:#9ece6a}.code .c{color:var(--faint)}.code .o{color:var(--accent)}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
-@media(max-width:860px){.cols{grid-template-columns:1fr}}
-.feature-list{list-style:none;margin-top:4px}
-.feature-list li{padding:12px 0;border-top:1px solid var(--border);font-size:14.5px;color:var(--muted)}
-.feature-list li:first-child{border-top:0}
-.feature-list strong{color:var(--text);font-weight:550;display:block;margin-bottom:2px}
+/* ---- misc structures ----------------------------------------------------- */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--ink)}
+.compare>div{padding:18px 22px 20px 0}
+.compare>div+div{border-left:1px solid var(--rule);padding-left:22px}
+.compare h3{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0 0 12px}
+.compare>div+div h3{color:var(--accent)}
+.compare ul{list-style:none}
+.compare li{padding:6px 0;border-bottom:1px solid var(--rule-soft);font-size:13.5px;color:var(--muted)}
+.compare li:last-child{border-bottom:0}
+.compare li strong{color:var(--ink);font-weight:600}
+@media(max-width:720px){.compare{grid-template-columns:1fr}.compare>div+div{border-left:0;padding-left:0;border-top:1px solid var(--rule)}}
 
-/* tables */
-table{width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:14px}
-th,td{text-align:left;padding:13px 18px;border-top:1px solid var(--border)}
-thead th{background:var(--surface-2);border-top:0;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-td{background:var(--surface);color:var(--muted)}
-td code{color:var(--text)}
-td:first-child{white-space:nowrap}
+dl.metrics{border-top:2px solid var(--ink);margin-bottom:30px}
+dl.metrics>div{display:grid;grid-template-columns:200px 1fr;gap:24px;padding:13px 0;border-bottom:1px solid var(--rule)}
+dl.metrics dt{font-family:var(--mono);font-size:17px;font-weight:650;letter-spacing:-.01em}
+dl.metrics dt em{font-style:normal;color:var(--accent)}
+dl.metrics dd{color:var(--muted);font-size:13.5px;align-self:center}
+@media(max-width:720px){dl.metrics>div{grid-template-columns:1fr;gap:2px}}
 
-/* security */
-.sec-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-.sec-grid>div{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
-.sec-grid h3{font-size:14px;font-weight:600;margin-bottom:6px}
-.sec-grid p{font-size:13.5px;color:var(--muted)}
-.quote{margin:0 0 36px;padding:22px 26px;border-left:3px solid var(--accent);background:var(--surface);border-radius:0 10px 10px 0;color:var(--text);font-size:15.5px;max-width:46rem}
+ol.guarantees{counter-reset:g;list-style:none;border-top:2px solid var(--ink)}
+ol.guarantees li{counter-increment:g;display:grid;grid-template-columns:44px 230px 1fr;gap:18px;padding:13px 0;border-bottom:1px solid var(--rule);font-size:13.5px}
+ol.guarantees li::before{content:counter(g,decimal-leading-zero);font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:2px}
+ol.guarantees .t{font-weight:600}
+ol.guarantees .d{color:var(--muted)}
+@media(max-width:720px){ol.guarantees li{grid-template-columns:34px 1fr}.guarantees .d{grid-column:2}}
 
-/* install section */
-.install-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-@media(max-width:860px){.install-grid{grid-template-columns:1fr}}
-.install-grid .code pre{font-size:13px}
-.install-grid h3{font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text)}
-.install-grid .note{font-size:12.5px;color:var(--faint);margin-top:8px}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}
+@media(max-width:880px){.twocol{grid-template-columns:1fr}}
+.plain{list-style:none;border-top:2px solid var(--ink)}
+.plain li{padding:11px 0;border-bottom:1px solid var(--rule);font-size:13.5px;color:var(--muted)}
+.plain li strong{display:block;color:var(--ink);font-weight:600;margin-bottom:1px}
 
-/* footer */
-footer{border-top:1px solid var(--border);padding:44px 0 56px;font-size:13.5px;color:var(--faint)}
-footer .wrap{display:flex;flex-wrap:wrap;gap:10px 28px;align-items:center}
-footer a{color:var(--muted)}
-footer .brand{font-size:14px;margin-right:auto}
+.installcols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px}
+@media(max-width:880px){.installcols{grid-template-columns:1fr}}
+.installcols h3{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0 0 10px}
+.installcols .note{font-size:12px;color:var(--faint);margin-top:8px}
+
+footer{border-top:2px solid var(--ink);margin-top:14px}
+footer .page{display:flex;flex-wrap:wrap;gap:8px 24px;padding-top:16px;padding-bottom:42px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+footer a{text-decoration:none;border-bottom:1px solid var(--rule)}
+footer .name{color:var(--ink);font-weight:600;margin-right:auto}
 </style>
 </head>
 <body>
 
-<nav>
-  <div class="wrap">
-    <a class="brand" href="#">
-      <svg width="20" height="20" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#e8590c"/><path d="M10 23V9h7a5 5 0 0 1 2.4 9.4L23 23h-4.2l-3-4H13.6v4Zm3.6-7.4H17a1.6 1.6 0 1 0 0-3.2h-3.4Z" fill="#0a0c10"/></svg>
-      rustinel
-    </a>
-    <div class="links">
-      <a href="#detectors">Detectors</a>
-      <a href="#proof">Proof</a>
-      <a href="#ci">CI</a>
-      <a href="#sbom">SBOM</a>
-      <a href="#security">Security model</a>
-      <a href="#install">Install</a>
-    </div>
-    <a class="gh" href="https://github.com/kosiorkosa47/rustinel">GitHub</a>
-  </div>
-</nav>
-
-<header class="hero">
-  <div class="wrap">
-    <h1>The supply-chain attack exists <em>before</em> the CVE does.</h1>
-    <p class="sub">rustinel is a static, offline-first risk scanner for Cargo dependencies — a pull-request
-    firewall that catches maintainer takeovers, typosquats, secret-exfiltration code and hidden payloads
-    while they are still invisible to advisory databases. And it matches <code>cargo audit</code>
-    advisory-for-advisory on the ones that aren't.</p>
-    <div class="install">
-      <code><span class="dollar">$ </span>cargo install cargo-rustinel</code>
-      <button class="copy" data-copy="cargo install cargo-rustinel">copy</button>
-    </div>
-    <div class="meta">
+<div class="topline">
+  <div class="page">
+    <span class="name">rustinel</span>
+    <span class="tagline">static supply-chain risk scanner for Cargo</span>
+    <span class="right">
+      <a href="https://github.com/kosiorkosa47/rustinel">github</a>
       <a href="https://crates.io/crates/cargo-rustinel">crates.io</a>
-      <a href="https://github.com/marketplace/actions/rustinel-supply-chain-risk-diff">GitHub Marketplace</a>
       <a href="https://docs.rs/rustinel-core">docs.rs</a>
-      <span>MIT / Apache-2.0</span>
-      <span>MSRV 1.86</span>
-    </div>
+    </span>
+  </div>
+</div>
 
-    <div class="term">
-      <div class="bar"><i></i><i></i><i></i><span>a pull request adds one dependency</span></div>
-      <pre><span class="c">$</span> cargo rustinel diff --base-lockfile main/Cargo.lock --head-lockfile pr/Cargo.lock \
+<header class="masthead">
+  <div class="page">
+    <h1>The supply-chain attack exists before the CVE does. Scan for the attack.</h1>
+    <p class="sub">rustinel is a static, offline-first risk scanner and <strong>pull-request firewall</strong> for
+    Cargo dependencies. It flags maintainer takeovers, typosquats, secret-exfiltration code and hidden payloads
+    while they are still invisible to advisory databases — and matches <code>cargo audit</code>
+    advisory-for-advisory on the ones that aren&#8217;t. It never executes the code it analyzes.</p>
+    <div class="specrow">
+      <div><span class="k">version</span>0.1.1</div>
+      <div><span class="k">license</span>MIT OR Apache-2.0</div>
+      <div><span class="k">msrv</span>rustc 1.86</div>
+      <div><span class="k">platforms</span>linux &#183; macos &#183; windows</div>
+      <div><span class="k">distribution</span><a href="https://crates.io/crates/cargo-rustinel">crates.io</a> &#183; <a href="https://github.com/marketplace/actions/rustinel-supply-chain-risk-diff">marketplace</a></div>
+    </div>
+    <div class="installline">
+      <span class="prompt">$</span><span id="cmd">cargo install cargo-rustinel</span>
+      <button data-copy="cargo install cargo-rustinel">copy</button>
+    </div>
+  </div>
+</header>
+
+<div class="page layout">
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#threat-model"><span class="n">01</span>Threat model</a></li>
+      <li><a href="#demonstration"><span class="n">02</span>Demonstration</a></li>
+      <li><a href="#signals"><span class="n">03</span>Signal catalog</a></li>
+      <li><a href="#precision"><span class="n">04</span>Measured precision</a></li>
+      <li><a href="#ci"><span class="n">05</span>CI integration</a></li>
+      <li><a href="#policy"><span class="n">06</span>Policy engine</a></li>
+      <li><a href="#interchange"><span class="n">07</span>Interchange</a></li>
+      <li><a href="#security-model"><span class="n">08</span>Security model</a></li>
+      <li><a href="#installation"><span class="n">09</span>Installation</a></li>
+    </ol>
+  </nav>
+
+  <article>
+
+    <section id="threat-model">
+      <div class="sechead"><span class="n">01</span><h2>Threat model</h2></div>
+      <p class="lede">An advisory database is a list of incidents that already happened, got noticed, got triaged
+      and got published. Every supply-chain attack has a window — days to years — in which it is live and no
+      database knows it. The xz backdoor sat in a trusted release; <code>faster_log</code> stole wallet keys from
+      crates.io for weeks with a clean <code>cargo audit</code> report. rustinel is built for that window, and
+      composes with the tools that aren&#8217;t.</p>
+      <div class="compare">
+        <div>
+          <h3>cargo audit — after disclosure</h3>
+          <ul>
+            <li><strong>Known RustSec advisories,</strong> matched by semver against the lockfile</li>
+            <li>Requires the incident to be discovered, triaged and published first</li>
+            <li>Nothing to say about a brand-new crate, a new maintainer, or a redirected source</li>
+          </ul>
+        </div>
+        <div>
+          <h3>rustinel — before disclosure, and after</h3>
+          <ul>
+            <li><strong>Everything on the left:</strong> advisory-for-advisory parity, verified against the live database and gated in CI</li>
+            <li><strong>Ten pre-CVE detectors</strong> for takeover, impersonation, malicious code and provenance (&#167;03)</li>
+            <li><strong>The PR risk diff:</strong> how this specific change moves your risk, and why (&#167;05)</li>
+            <li><strong>Compliance artifacts</strong> from the same scan: SBOM, VEX, OSV, SARIF (&#167;07)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="demonstration">
+      <div class="sechead"><span class="n">02</span><h2>Demonstration</h2></div>
+      <p class="lede">A pull request adds one dependency. There is no advisory to match — when this crate was live
+      on crates.io, no database knew it. Three independent signals flag it statically, source never executed.</p>
+      <pre class="term"><span class="c">$</span> cargo rustinel diff --base-lockfile main/Cargo.lock --head-lockfile pr/Cargo.lock \
     --source-path vendor/ --policy rustinel.toml
 
 <span class="w">Risk delta: 12 &#8594; 64 (+52) HIGH</span>
@@ -209,282 +248,183 @@ Top findings:
          crate <span class="g">`fast_log`</span> &#8212; likely typosquat / impersonation
   <span class="y">[LOW ]</span> faster-log@1.0.4: version published 2 day(s) ago &#8212; the window
          in which an attack lives before anyone has reviewed it</pre>
-    </div>
-    <p class="caption">The September 2025 <code>faster_log</code> crypto-stealer, reconstructed as a permanent
-    test in rustinel&#8217;s suite. When it was live on crates.io there was no advisory to match — a database-only
-    scanner reported a clean tree. Three independent signals flag it statically, with the source never executed.</p>
-  </div>
-</header>
+      <p class="fig"><b>Fig. 1</b> — the September 2025 <code>faster_log</code> crypto-stealer, reconstructed as a
+      permanent test in rustinel&#8217;s suite. Every finding carries evidence, a confidence score and the dependency
+      path that pulls the crate into the tree.</p>
+    </section>
 
-<section>
-  <div class="wrap">
-    <p class="kicker">The gap</p>
-    <h2>Advisory scanners look backwards. Attacks happen forwards.</h2>
-    <p class="lede">An advisory database is a list of incidents that already happened, got noticed, got triaged
-    and got published. Every supply-chain attack has a window — days to years — where it is live and no database
-    knows it. rustinel is built for that window, and composes with the tools that aren&#8217;t.</p>
-    <div class="gap-grid">
-      <div>
-        <h3>cargo audit — after disclosure</h3>
-        <ul>
-          <li><strong>Known CVEs / RustSec advisories</strong> — matched by semver</li>
-          <li>Requires the incident to be discovered, triaged, published</li>
-          <li>xz backdoor window: flagged after disclosure</li>
-          <li>faster_log (Sept 2025): clean report while it stole keys</li>
-        </ul>
-      </div>
-      <div>
-        <h3 class="now">rustinel — before disclosure (and after)</h3>
-        <ul>
-          <li><strong>Everything on the left</strong> — verified advisory-for-advisory parity</li>
-          <li><strong>Plus 10 pre-CVE detectors</strong> — takeover, impersonation, malicious code, provenance</li>
-          <li><strong>Plus the PR risk diff</strong> — how does <em>this change</em> move your risk, and why</li>
-          <li><strong>Plus compliance artifacts</strong> — SBOM, VEX, SARIF, OSV from the same scan</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
+    <section id="signals">
+      <div class="sechead"><span class="n">03</span><h2>Signal catalog</h2></div>
+      <p class="lede">All detectors are static and read-only. rustinel never runs <code>build.rs</code>, never
+      compiles, never loads the code it analyzes — analysis is substring- and structure-level over unpacked
+      sources, lockfiles and registry metadata.</p>
+      <table>
+        <thead><tr><th>signal</th><th class="cls">class</th><th>fires when</th><th class="cls">precedent</th></tr></thead>
+        <tbody>
+          <tr><td class="sig">owners_changed</td><td class="cls">takeover</td><td>The owner set of a dependency changed against your recorded trust baseline. A maintainer handover is invisible in code and in every advisory feed.</td><td class="inc">xz, event-stream</td></tr>
+          <tr><td class="sig">freshly_published</td><td class="cls">takeover</td><td>The locked version was published within the last 14 days. New means unreviewed; the publication window is where a compromised release does its damage.</td><td class="inc">xz 5.6.0</td></tr>
+          <tr><td class="sig">possible_typosquat</td><td class="cls">impersonation</td><td>The name is one edit from a popular crate, corroborated against download counts so established look-alikes stay quiet. Detects Unicode homoglyphs (<code>serd&#1077;</code>, Cyrillic &#1077;) that byte-level checks cannot see.</td><td class="inc">faster_log</td></tr>
+          <tr><td class="sig">source_substitution</td><td class="cls">impersonation</td><td>A popular crate name resolves from a source that is not crates.io — dependency confusion, including a lockfile that silently redirects one pinned version to a git repository.</td><td class="inc">dep. confusion</td></tr>
+          <tr><td class="sig">suspicious_source_exfil</td><td class="cls">malicious code</td><td>Runtime source reads the project&#8217;s own files <strong>and</strong> reaches the network or handles wallet-key formats — in the same file.</td><td class="inc">faster_log</td></tr>
+          <tr><td class="sig">suspicious_exfil_domain</td><td class="cls">malicious code</td><td>A hard-coded exfiltration endpoint: <code>*.workers.dev</code>, <code>webhook.site</code>, pastebin, ngrok. Dual-use services (Telegram, Discord webhooks) require same-file secret handling, so bots and notifiers stay clean.</td><td class="inc">faster_log, xrvrv</td></tr>
+          <tr><td class="sig">env_gated_payload</td><td class="cls">malicious code</td><td>Code that detonates only under CI environment variables — env read, network fetch and process execution within a tight window. Built to hide on a laptop and fire in CI.</td><td class="inc">rustdecimal</td></tr>
+          <tr><td class="sig">obfuscated_payload</td><td class="cls">malicious code</td><td>A large embedded base64/hex blob, decoded <strong>and</strong> fed to a process spawn or dynamic loader. A blob decoded into data — a certificate, a fixture — is not flagged; the execution sink is the discriminator.</td><td class="inc">&#8212;</td></tr>
+          <tr><td class="sig">build_script_suspicious</td><td class="cls">build time</td><td>A <code>build.rs</code> that reaches the network or unpacks an opaque payload, scanned statically. Legitimate <code>cc</code>-style native builds are not flagged.</td><td class="inc">build-time droppers</td></tr>
+          <tr><td class="sig">denied_crate</td><td class="cls">policy</td><td>A crate on the operator deny list — matched across <code>-</code>/<code>_</code> variants and enforced on git and path dependencies, so it can never silently no-op.</td><td class="inc">&#8212;</td></tr>
+        </tbody>
+      </table>
+      <h3>Baseline coverage</h3>
+      <p class="lede" style="margin-bottom:0">RustSec advisory matching (full cargo-audit parity, v4 database, offline cache) &#183;
+      yanked versions &#183; license detection with SPDX expression evaluation and allow/deny policy &#183;
+      <code>unsafe</code> usage counts &#183; native/FFI surface &#183; duplicate versions &#183; lockfile-poisoning
+      diff (a redirected <code>source</code> or swapped <code>checksum</code> on an unchanged version) &#183; a
+      dependency path on every transitive finding.</p>
+    </section>
 
-<section id="detectors">
-  <div class="wrap">
-    <p class="kicker">Pre-CVE detectors</p>
-    <h2>Ten signals for attacks that don&#8217;t have a name yet.</h2>
-    <p class="lede">Every detector is static and read-only: rustinel never executes, never compiles, never loads
-    the code it analyzes. Each finding carries evidence, a confidence score and the dependency path that pulls
-    the crate into your tree.</p>
-    <div class="cards">
-      <div class="card">
-        <span class="tag">takeover</span>
-        <h3>owners_changed</h3>
-        <p>The owner set of a trusted crate changed against your recorded baseline. <strong>The xz and
-        event-stream vector</strong> — a maintainer handover is invisible in the code and in every advisory feed.</p>
-      </div>
-      <div class="card">
-        <span class="tag">takeover</span>
-        <h3>freshly_published</h3>
-        <p>The locked version went live days ago. <strong>New means unreviewed</strong> — the publication window
-        is where every compromised release does its damage.</p>
-      </div>
-      <div class="card">
-        <span class="tag">impersonation</span>
-        <h3>possible_typosquat</h3>
-        <p>A name one edit away from a popular crate, corroborated against download counts so look-alikes with
-        real adoption stay quiet. <strong>Catches Unicode homoglyphs</strong> (<code>serd&#1077;</code> with a
-        Cyrillic &#1077;) that byte-level checks can&#8217;t see.</p>
-      </div>
-      <div class="card">
-        <span class="tag">impersonation</span>
-        <h3>source_substitution</h3>
-        <p>A popular crate name resolved from a source that is <strong>not crates.io</strong> — the
-        dependency-confusion shape, including a lockfile that silently redirects one pinned version to a git repo.</p>
-      </div>
-      <div class="card">
-        <span class="tag">malicious code</span>
-        <h3>suspicious_source_exfil</h3>
-        <p>Runtime source that scans <strong>your project&#8217;s own files</strong> and reaches the network or
-        handles wallet-key formats. The fingerprint of the <code>faster_log</code> / <code>async_println</code>
-        crypto-stealers.</p>
-      </div>
-      <div class="card">
-        <span class="tag">malicious code</span>
-        <h3>suspicious_exfil_domain</h3>
-        <p>Hard-coded exfiltration endpoints — <code>*.workers.dev</code>, <code>webhook.site</code>, pastebin,
-        ngrok and friends. Dual-use services (Telegram API, Discord webhooks) only fire <strong>with same-file
-        secret handling</strong>, so bots and notifiers stay clean.</p>
-      </div>
-      <div class="card">
-        <span class="tag">malicious code</span>
-        <h3>env_gated_payload</h3>
-        <p>Code that only detonates under CI environment variables — read env, fetch, execute, all within a tight
-        window. <strong>The rustdecimal pattern</strong> (2022): payloads built to hide from a laptop and fire in CI.</p>
-      </div>
-      <div class="card">
-        <span class="tag">malicious code</span>
-        <h3>obfuscated_payload</h3>
-        <p>A large embedded base64/hex blob that gets <strong>decoded and fed to a process spawn or dynamic
-        loader</strong>. A blob decoded into data — a cert, a fixture — is not flagged; the execution sink is
-        the discriminator.</p>
-      </div>
-      <div class="card">
-        <span class="tag">build time</span>
-        <h3>build_script_suspicious</h3>
-        <p>A <code>build.rs</code> that reaches the network or unpacks an opaque payload — scanned statically,
-        <strong>never executed</strong>. Legitimate <code>cc</code>-style native builds are not flagged.</p>
-      </div>
-      <div class="card">
-        <span class="tag">policy</span>
-        <h3>denied_crate</h3>
-        <p>An operator deny list that <strong>can never silently no-op</strong>: matched across
-        <code>-</code>/<code>_</code> name variants and enforced on git and path dependencies too.</p>
-      </div>
-    </div>
-    <p class="also"><strong>And the baseline a scanner must have:</strong> RustSec advisory matching (full
-    cargo-audit parity, v4 database, offline cache) &#183; yanked versions &#183; license detection with SPDX
-    expression evaluation and allow/deny policy &#183; <code>unsafe</code> usage counts &#183; native/FFI surface
-    &#183; duplicate versions &#183; lockfile-poisoning diff (a redirected <code>source</code> or swapped
-    <code>checksum</code> on an unchanged version) &#183; a dependency path on every transitive finding.</p>
-  </div>
-</section>
+    <section id="precision">
+      <div class="sechead"><span class="n">04</span><h2>Measured precision</h2></div>
+      <p class="lede">A heuristic scanner is only useful if it does not cry wolf. Every number below is
+      reproducible from the repository: the data study ships as a script, the reconstructions run as permanent
+      tests, and parity is enforced by a CI gate.</p>
+      <dl class="metrics">
+        <div><dt><em>0</em> / 966</dt><dd>false positives from the signals that assert malice, across 966 real crates — full dependency closures plus freshly-published crates.io uploads. <a href="https://github.com/kosiorkosa47/rustinel/blob/main/docs/DATA-STUDY.md">Methodology and raw numbers</a>.</dd></div>
+        <div><dt>1 : 1</dt><dd>advisory parity with cargo-audit, verified finding-for-finding against the live RustSec database on every CI run.</dd></div>
+        <div><dt>8 fuzz targets</dt><dd>coverage-guided fuzzing over every parser that touches untrusted input — lockfiles, manifests, sources, advisories — running nightly.</dd></div>
+      </dl>
+      <h3>Reconstructed incidents</h3>
+      <table>
+        <thead><tr><th>incident</th><th class="cls">year</th><th>shape</th><th class="cls">caught by</th></tr></thead>
+        <tbody>
+          <tr><td class="sig">xz / liblzma</td><td class="cls">2024</td><td>maintainer takeover of a ubiquitous dependency, years in the making</td><td class="inc">owners_changed, freshness</td></tr>
+          <tr><td class="sig">event-stream</td><td class="cls">2018</td><td>npm handover to a volunteer attacker — same shape, different ecosystem</td><td class="inc">owners_changed</td></tr>
+          <tr><td class="sig">faster_log</td><td class="cls">2025</td><td>crates.io typosquat scanning source files for wallet keys, exfiltrating via workers.dev</td><td class="inc">exfil, typosquat, freshness</td></tr>
+          <tr><td class="sig">rustdecimal</td><td class="cls">2022</td><td>crates.io typosquat with a CI-gated payload (GITLAB_CI &#8594; download &#8594; exec)</td><td class="inc">env_gated_payload</td></tr>
+          <tr><td class="sig">dep. confusion</td><td class="cls">&#8212;</td><td>a popular crate name served from a non-crates.io source</td><td class="inc">source_substitution</td></tr>
+        </tbody>
+      </table>
+      <p class="fig">Each reconstruction is a deterministic, permanently-passing test —
+      <a href="https://github.com/kosiorkosa47/rustinel/blob/main/docs/PROACTIVE-DETECTION.md">what advisory
+      scanners structurally cannot see</a>.</p>
+    </section>
 
-<section id="proof">
-  <div class="wrap">
-    <p class="kicker">Proof, not promises</p>
-    <h2>A heuristic scanner is only useful if it doesn&#8217;t cry wolf.</h2>
-    <p class="lede">Every claim below is reproducible from the repository — the data study ships as a script,
-    the attack reconstructions run as permanent tests, and advisory parity is enforced by a CI gate.</p>
-    <div class="stats">
-      <div><div class="n"><em>0</em> / 966</div><div class="d">false positives from malice-asserting signals across 966 real crates — full dependency closures plus freshly-published crates.io uploads</div></div>
-      <div><div class="n">1 : 1</div><div class="d">advisory parity with cargo-audit, verified finding-for-finding against the live RustSec database and gated in CI</div></div>
-      <div><div class="n">5</div><div class="d">real attacks reconstructed as deterministic, permanently-passing tests</div></div>
-      <div><div class="n">8</div><div class="d">coverage-guided fuzz targets over every untrusted-input parser, fuzzed nightly</div></div>
-    </div>
-    <ul class="recon">
-      <li><span class="name">xz / liblzma</span><span class="what">2024 — maintainer takeover of a ubiquitous dependency, years in the making</span><span class="sig">owners_changed + freshly_published</span></li>
-      <li><span class="name">event-stream</span><span class="what">2018 — npm handover to a volunteer attacker; same shape, different ecosystem</span><span class="sig">owners_changed</span></li>
-      <li><span class="name">faster_log</span><span class="what">Sept 2025 — crates.io typosquat that scanned source files for wallet keys and exfiltrated them</span><span class="sig">exfil + typosquat + freshness</span></li>
-      <li><span class="name">rustdecimal</span><span class="what">2022 — crates.io typosquat with a CI-gated payload (GITLAB_CI &#8594; download &#8594; exec)</span><span class="sig">env_gated_payload</span></li>
-      <li><span class="name">dependency confusion</span><span class="what">a popular crate name served from a non-crates.io source</span><span class="sig">source_substitution</span></li>
-    </ul>
-    <p class="caption">Methodology, raw numbers and the reproducible script:
-    <a href="https://github.com/kosiorkosa47/rustinel/blob/main/docs/DATA-STUDY.md">docs/DATA-STUDY.md</a> &#183;
-    what advisory scanners structurally cannot see:
-    <a href="https://github.com/kosiorkosa47/rustinel/blob/main/docs/PROACTIVE-DETECTION.md">docs/PROACTIVE-DETECTION.md</a></p>
-  </div>
-</section>
-
-<section id="ci">
-  <div class="wrap">
-    <p class="kicker">The PR firewall</p>
-    <h2>Risk review where dependencies actually change: the pull request.</h2>
-    <div class="cols">
-      <div class="code">
-        <span class="lbl">.github/workflows/supply-chain.yml</span>
-        <pre><span class="k">permissions</span>:
-  <span class="k">contents</span>: read
-  <span class="k">pull-requests</span>: write
-<span class="k">jobs</span>:
-  <span class="k">supply-chain</span>:
-    <span class="k">runs-on</span>: ubuntu-latest
-    <span class="k">steps</span>:
-      - <span class="k">uses</span>: actions/checkout@v4
-        <span class="k">with</span>: { fetch-depth: 0 }
-      - <span class="k">run</span>: |
-          git show <span class="s">"origin/${{ github.base_ref }}:Cargo.lock"</span> \
+    <section id="ci">
+      <div class="sechead"><span class="n">05</span><h2>CI integration</h2></div>
+      <p class="lede">Dependencies change in pull requests, so that is where review belongs. The GitHub Action
+      posts a sticky comment with the risk delta — created once, updated in place on every push — and fails the
+      check on a policy violation.</p>
+      <div class="twocol">
+        <pre class="conf"><span class="c"># .github/workflows/supply-chain.yml</span>
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: |
+          git show "origin/${{ github.base_ref }}:Cargo.lock" \
             &gt; base.Cargo.lock || cp Cargo.lock base.Cargo.lock
-      - <span class="k">uses</span>: <span class="o">kosiorkosa47/rustinel@v0</span>
-        <span class="k">with</span>:
-          <span class="k">command</span>: diff
-          <span class="k">base-lockfile</span>: base.Cargo.lock
-          <span class="k">head-lockfile</span>: Cargo.lock
-          <span class="k">policy</span>: rustinel.toml
-          <span class="k">online-metadata</span>: <span class="s">"true"</span>
-          <span class="c"># also file findings on the Security tab:</span>
-          <span class="c"># code-scanning: "true"</span></pre>
+      - uses: <span class="o">kosiorkosa47/rustinel@v0</span>
+        with:
+          command: diff
+          base-lockfile: base.Cargo.lock
+          head-lockfile: Cargo.lock
+          policy: rustinel.toml
+          online-metadata: "true"
+          <span class="c"># code-scanning: "true"  # findings -&gt; Security tab</span></pre>
+        <ul class="plain">
+          <li><strong>Sticky PR comment</strong>Advisories and pre-CVE signals in separate sections: reviewers see what cargo-audit would have said, and what only rustinel sees.</li>
+          <li><strong>Policy-driven exit code</strong>The gate is your <code>rustinel.toml</code>, not a hardcoded threshold. <code>fail</code> &#8594; exit 1.</li>
+          <li><strong>Code-scanning alerts</strong>Opt-in SARIF upload files findings on the Security tab with stable fingerprints — alerts resolve when fixed instead of churning.</li>
+          <li><strong>Pinned install</strong>A version-tagged ref installs exactly that version; any other ref builds from the exact pinned commit. The scanner is not itself a supply-chain risk.</li>
+        </ul>
       </div>
-      <ul class="feature-list">
-        <li><strong>Sticky PR comment</strong>Risk delta, decision and the findings that caused it — created once, updated in place on every push. Advisories and pre-CVE signals are listed in separate sections, so reviewers see what cargo-audit would have said and what only rustinel sees.</li>
-        <li><strong>Policy as the gate</strong>The exit code is driven by your <code>rustinel.toml</code> — three built-in profiles (<code>strict</code> / <code>balanced</code> / <code>permissive</code>), severity ladders, license allow/deny, crate deny lists, risk-delta thresholds.</li>
-        <li><strong>Code-scanning alerts</strong>Opt-in SARIF upload turns findings into tracked alerts on the repository&#8217;s Security tab — with stable fingerprints, so an alert resolves when fixed instead of churning.</li>
-        <li><strong>Pinned install</strong>A version-tagged action ref installs exactly that version; any other ref builds from the exact pinned commit. The supply-chain scanner is not itself a supply-chain risk.</li>
-      </ul>
-    </div>
-  </div>
-</section>
+    </section>
 
-<section>
-  <div class="wrap">
-    <p class="kicker">Policy</p>
-    <h2>Your rules, enforced — never silently relaxed.</h2>
-    <div class="cols">
-      <div class="code">
-        <span class="lbl">rustinel.toml</span>
-        <pre><span class="k">version</span> = 1
+    <section id="policy">
+      <div class="sechead"><span class="n">06</span><h2>Policy engine</h2></div>
+      <p class="lede">Three built-in profiles (<code>strict</code> / <code>balanced</code> / <code>permissive</code>),
+      overridable per project. The engine is fail-closed by design: misconfiguration degrades loudly, never silently.</p>
+      <div class="twocol">
+        <pre class="conf"><span class="c"># rustinel.toml</span>
+version = 1
 
 [<span class="o">profile</span>]
-<span class="k">name</span> = <span class="s">"balanced"</span>   <span class="c"># strict | balanced | permissive</span>
+name = "balanced"
 
 [<span class="o">risk</span>]
-<span class="k">max_project_score</span>   = 70
-<span class="k">fail_on_delta_above</span> = 35
+max_project_score   = 70
+fail_on_delta_above = 35
 
 [<span class="o">advisories</span>]
-<span class="k">fail_on</span> = [<span class="s">"critical"</span>, <span class="s">"high"</span>]
+fail_on = ["critical", "high"]
 
 [<span class="o">licenses</span>]
-<span class="k">deny</span> = [<span class="s">"GPL-3.0"</span>, <span class="s">"AGPL-3.0"</span>]
+deny = ["GPL-3.0", "AGPL-3.0"]
 
 [<span class="o">deny</span>]
-<span class="k">crates</span> = [<span class="s">"leftpad-rs"</span>]</pre>
+crates = ["leftpad-rs"]</pre>
+        <ul class="plain">
+          <li><strong>Fail-closed semantics</strong>A malformed SPDX expression containing a denied license is denied. An advisory severity the policy forgot to list surfaces as a warning. A misspelled profile name is a hard error, not a silent fallback.</li>
+          <li><strong>Severity that means something</strong>CVSS v3.x vectors are computed per the first.org specification, so a 9.8 drives the <code>critical</code> rule. Risk scoring applies diminishing returns per signal class — thirty <code>-sys</code> crates cannot drown one exfiltration finding.</li>
+          <li><strong>Explainable decisions</strong><code>--explain</code> prints the live score breakdown; every decision lists the exact violations, review items and warnings that produced it.</li>
+        </ul>
       </div>
-      <ul class="feature-list">
-        <li><strong>Fail-closed by design</strong>A malformed SPDX expression containing a denied license is denied. An advisory severity your policy forgot to list surfaces as a warning instead of vanishing. A misspelled profile name is a hard error, not a silent downgrade to defaults.</li>
-        <li><strong>Severity that means something</strong>CVSS v3.x vectors are computed per the first.org specification, so a 9.8 drives your <code>critical</code> rule — and risk scoring uses diminishing returns per signal class, so thirty <code>-sys</code> crates don&#8217;t drown one exfil finding.</li>
-        <li><strong>Explainable</strong><code>--explain</code> prints the live score breakdown; every decision lists the exact violations, review items and warnings that produced it.</li>
-      </ul>
-    </div>
-  </div>
-</section>
+    </section>
 
-<section id="sbom">
-  <div class="wrap">
-    <p class="kicker">Standards &amp; interchange</p>
-    <h2>One scan, every compliance artifact.</h2>
-    <p class="lede"><code>cargo rustinel export</code> emits standards-grade documents straight from your lockfile
-    and advisory matches — deterministic (<code>--no-timestamp</code> for byte-identical output), JSON-encoded,
-    with correct provenance for git and alternate-registry dependencies.</p>
-    <table>
-      <thead><tr><th>--format</th><th>Standard</th><th>Use</th></tr></thead>
-      <tbody>
-        <tr><td><code>cyclonedx</code></td><td>CycloneDX 1.5</td><td>SBOM with embedded vulnerabilities and SHA-256 component hashes — EU CRA / US EO 14028</td></tr>
-        <tr><td><code>spdx</code></td><td>SPDX 2.3</td><td>SBOM with packages, relationships and validated license expressions</td></tr>
-        <tr><td><code>osv</code></td><td>osv.dev schema</td><td>Vulnerability records for OSV-compatible tooling</td></tr>
-        <tr><td><code>openvex</code></td><td>OpenVEX v0.2.0</td><td>Machine-readable exploitability statements; policy-waived advisories become <code>not_affected</code></td></tr>
-        <tr><td><code>sarif</code></td><td>SARIF 2.1.0</td><td>Code-scanning dashboards (GitHub Security tab and others)</td></tr>
-      </tbody>
-    </table>
-  </div>
-</section>
+    <section id="interchange">
+      <div class="sechead"><span class="n">07</span><h2>Interchange formats</h2></div>
+      <p class="lede"><code>cargo rustinel export</code> emits standards-grade artifacts from the same scan —
+      deterministic (<code>--no-timestamp</code> for byte-identical output), JSON-encoded, with correct
+      provenance qualifiers for git and alternate-registry dependencies.</p>
+      <table>
+        <thead><tr><th>format</th><th class="cls">standard</th><th>use</th></tr></thead>
+        <tbody>
+          <tr><td class="sig">cyclonedx</td><td class="cls">CycloneDX 1.5</td><td>SBOM with embedded vulnerabilities and SHA-256 component hashes — EU CRA / US EO 14028</td></tr>
+          <tr><td class="sig">spdx</td><td class="cls">SPDX 2.3</td><td>SBOM with packages, relationships and validated license expressions</td></tr>
+          <tr><td class="sig">osv</td><td class="cls">osv.dev</td><td>vulnerability records for OSV-compatible tooling</td></tr>
+          <tr><td class="sig">openvex</td><td class="cls">OpenVEX 0.2</td><td>machine-readable exploitability statements; policy-waived advisories become <code>not_affected</code></td></tr>
+          <tr><td class="sig">sarif</td><td class="cls">SARIF 2.1.0</td><td>code-scanning dashboards — GitHub Security tab and others</td></tr>
+        </tbody>
+      </table>
+    </section>
 
-<section id="security">
-  <div class="wrap">
-    <p class="kicker">Security model</p>
-    <h2>A supply-chain tool must not be a supply-chain risk.</h2>
-    <blockquote class="quote">rustinel never runs <code>build.rs</code>, never runs <code>cargo build</code> on an
-    analyzed project, and never loads or executes dependency code. Analysis is static, read-only and
-    offline-first.</blockquote>
-    <div class="sec-grid">
-      <div><h3>Offline by default</h3><p>Advisory matching runs from a local cache. The only network feature, <code>--online-metadata</code>, is opt-in — and a build with <code>--no-default-features</code> contains no HTTPS client at all.</p></div>
-      <div><h3>SSRF-proof lookups</h3><p>Online metadata queries go to a fixed host with validated crate-name paths and redirects disabled. No request target is ever derived from analyzed data.</p></div>
-      <div><h3>Hostile-input hardened</h3><p>Every parser that touches untrusted input — lockfiles, manifests, sources, advisories — is panic-guarded and continuously fuzzed across 8 nightly targets.</p></div>
-      <div><h3>Bounded everything</h3><p>Size-capped reads (oversized files are scanned as a prefix, never skipped), depth- and entry-bounded directory walks, symlinks never followed.</p></div>
-      <div><h3>Injection-safe output</h3><p>PR comments, SARIF and terminal output escape untrusted text — including Trojan-Source bidi overrides and zero-width characters.</p></div>
-      <div><h3>Loud degradation</h3><p>A failed online lookup, a partial result, a capped walk — every degraded answer says so. No silent fail-open paths.</p></div>
-    </div>
-  </div>
-</section>
+    <section id="security-model">
+      <div class="sechead"><span class="n">08</span><h2>Security model</h2></div>
+      <p class="lede">A supply-chain tool must not be a supply-chain risk. Every input rustinel touches is treated
+      as hostile.</p>
+      <ol class="guarantees">
+        <li><span class="t">No execution</span><span class="d">Never runs <code>build.rs</code>, never runs <code>cargo build</code> on an analyzed project, never loads or executes dependency code. Analysis is static and read-only.</span></li>
+        <li><span class="t">Offline by default</span><span class="d">Advisory matching runs from a local cache. The only network feature, <code>--online-metadata</code>, is opt-in; a <code>--no-default-features</code> build contains no HTTPS client at all.</span></li>
+        <li><span class="t">SSRF-proof lookups</span><span class="d">Online queries go to a fixed host with validated crate-name paths and redirects disabled. No request target is ever derived from analyzed data.</span></li>
+        <li><span class="t">Hostile-input hardened</span><span class="d">Every parser of untrusted input is panic-guarded and continuously fuzzed (8 nightly coverage-guided targets).</span></li>
+        <li><span class="t">Bounded everything</span><span class="d">Size-capped reads — oversized files are scanned as a prefix, never skipped. Depth- and entry-bounded walks; symlinks never followed.</span></li>
+        <li><span class="t">Injection-safe output</span><span class="d">PR comments, SARIF and terminal output escape untrusted text, including Trojan-Source bidi overrides and zero-width characters.</span></li>
+        <li><span class="t">Loud degradation</span><span class="d">A failed lookup, a partial result, a capped walk — every degraded answer says so. No silent fail-open paths.</span></li>
+      </ol>
+    </section>
 
-<section id="install">
-  <div class="wrap">
-    <p class="kicker">Quick start</p>
-    <h2>Scanning in under a minute.</h2>
-    <div class="install-grid">
-      <div>
-        <h3>1 &#183; Install</h3>
-        <div class="code"><pre><span class="c"># from crates.io</span>
+    <section id="installation">
+      <div class="sechead"><span class="n">09</span><h2>Installation</h2></div>
+      <div class="installcols">
+        <div>
+          <h3>install</h3>
+          <pre class="conf"><span class="c"># from crates.io</span>
 cargo install cargo-rustinel
 
-<span class="c"># prebuilt binary, no compile</span>
+<span class="c"># prebuilt binary</span>
 cargo binstall cargo-rustinel
 
 <span class="c"># zero network dependencies</span>
 cargo install cargo-rustinel \
-  --no-default-features</pre></div>
-        <p class="note">MSRV 1.86 &#183; Linux, macOS, Windows</p>
-      </div>
-      <div>
-        <h3>2 &#183; Scan</h3>
-        <div class="code"><pre><span class="c"># one lockfile</span>
+  --no-default-features</pre>
+          <p class="note">MSRV 1.86 &#183; Linux, macOS, Windows</p>
+        </div>
+        <div>
+          <h3>scan</h3>
+          <pre class="conf"><span class="c"># one lockfile</span>
 cargo rustinel check \
   --lockfile Cargo.lock
 
@@ -492,12 +432,12 @@ cargo rustinel check \
 cargo rustinel diff \
   --base-lockfile base.Cargo.lock \
   --head-lockfile Cargo.lock \
-  --format markdown</pre></div>
-        <p class="note">Formats: human &#183; json &#183; markdown &#183; sarif</p>
-      </div>
-      <div>
-        <h3>3 &#183; Gate &amp; export</h3>
-        <div class="code"><pre><span class="c"># starter policy</span>
+  --format markdown</pre>
+          <p class="note">Formats: human &#183; json &#183; markdown &#183; sarif</p>
+        </div>
+        <div>
+          <h3>gate &amp; export</h3>
+          <pre class="conf"><span class="c"># starter policy</span>
 cargo rustinel policy init \
   --profile balanced &gt; rustinel.toml
 
@@ -505,31 +445,29 @@ cargo rustinel policy init \
 cargo rustinel advisory update
 
 <span class="c"># compliance artifacts</span>
-cargo rustinel export \
-  --format cyclonedx</pre></div>
-        <p class="note">Exit code is policy-driven: fail &#8594; 1</p>
+cargo rustinel export --format cyclonedx</pre>
+          <p class="note">Exit code is policy-driven: fail &#8594; 1</p>
+        </div>
       </div>
-    </div>
-  </div>
-</section>
+    </section>
+
+  </article>
+</div>
 
 <footer>
-  <div class="wrap">
-    <span class="brand">
-      <svg width="16" height="16" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#e8590c"/><path d="M10 23V9h7a5 5 0 0 1 2.4 9.4L23 23h-4.2l-3-4H13.6v4Zm3.6-7.4H17a1.6 1.6 0 1 0 0-3.2h-3.4Z" fill="#0a0c10"/></svg>
-      rustinel
-    </span>
-    <a href="https://github.com/kosiorkosa47/rustinel">GitHub</a>
+  <div class="page">
+    <span class="name">rustinel</span>
+    <a href="https://github.com/kosiorkosa47/rustinel">github</a>
     <a href="https://crates.io/crates/cargo-rustinel">crates.io</a>
     <a href="https://docs.rs/rustinel-core">docs.rs</a>
     <a href="https://github.com/kosiorkosa47/rustinel/blob/main/docs/COMPARISON.md">vs cargo-audit / deny / vet</a>
-    <a href="https://github.com/kosiorkosa47/rustinel/blob/main/CHANGELOG.md">Changelog</a>
-    <span>MIT / Apache-2.0</span>
+    <a href="https://github.com/kosiorkosa47/rustinel/blob/main/CHANGELOG.md">changelog</a>
+    <span>MIT OR Apache-2.0</span>
   </div>
 </footer>
 
 <script>
-for (const btn of document.querySelectorAll(".copy")) {
+for (const btn of document.querySelectorAll("[data-copy]")) {
   btn.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(btn.dataset.copy);
