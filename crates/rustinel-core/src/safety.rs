@@ -57,8 +57,10 @@ pub fn is_safe_version(version: &str) -> bool {
         && version
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'+' | b'-' | b'_'))
-        // Defense in depth: reject anything that could be a parent reference.
-        && version != ".."
+        // Defense in depth: reject anything that could be a path component
+        // reference (`.` is the current dir; `..`-containing strings could be
+        // parent references).
+        && version != "."
         && !version.contains("..")
 }
 
@@ -89,9 +91,16 @@ pub fn has_no_parent_components(path: &Path) -> bool {
     !path.components().any(|c| matches!(c, Component::ParentDir))
 }
 
-/// Read a regular file, refusing anything larger than `max_bytes`, anything that
-/// is not a regular file, and reading at most `max_bytes` even if the file grows
-/// underneath us. Returns `None` (never an error) so callers degrade gracefully.
+/// Read a regular file, truncating it to at most `max_bytes` (even if the file
+/// grows underneath us) and refusing anything that is not a regular file.
+/// Returns `None` (never an error) so callers degrade gracefully.
+///
+/// Oversized files are scanned as a capped prefix, never skipped: dropping the
+/// file entirely would let a crate evade every source scanner by padding a
+/// malicious file past the cap. The scanners do substring matching, so
+/// analyzing the prefix is strictly better than analyzing nothing. (Structured
+/// callers — TOML manifests, advisories — fail their parse on a truncated
+/// document, which is a loud failure, not a silent skip.)
 ///
 /// Callers should additionally skip symlinks during directory traversal; this
 /// function guards the read itself via an fstat on the open handle plus a capped
@@ -100,9 +109,6 @@ pub fn read_file_capped(path: &Path, max_bytes: u64) -> Option<String> {
     let file = File::open(path).ok()?;
     let meta = file.metadata().ok()?;
     if !meta.is_file() {
-        return None;
-    }
-    if meta.len() > max_bytes {
         return None;
     }
     let mut bytes = Vec::new();
@@ -151,6 +157,8 @@ mod tests {
         assert!(!is_safe_version("../1.0.0"));
         assert!(!is_safe_version("1.0.0/.."));
         assert!(!is_safe_version(".."));
+        assert!(!is_safe_version("."));
+        assert!(!is_safe_version("..."));
         assert!(!is_safe_version("1 0"));
         assert!(!is_safe_version(""));
     }
@@ -178,12 +186,19 @@ mod tests {
     }
 
     #[test]
-    fn read_cap_rejects_oversize() {
+    fn read_cap_truncates_oversize_instead_of_skipping() {
+        // An oversized file must be scanned as a capped prefix — skipping it
+        // would let `// padding...` after a payload hide the file from every
+        // scanner (one-line evasion).
         let dir = std::env::temp_dir();
         let path = dir.join("rustinel_safety_big.txt");
-        std::fs::write(&path, vec![b'a'; 1024]).unwrap();
+        let mut content = b"reqwest::get(\"https://evil.workers.dev\");".to_vec();
+        content.resize(1024, b'a');
+        std::fs::write(&path, &content).unwrap();
         assert!(read_file_capped(&path, 4096).is_some());
-        assert!(read_file_capped(&path, 512).is_none());
+        let truncated = read_file_capped(&path, 512).expect("prefix must be scanned");
+        assert_eq!(truncated.len(), 512);
+        assert!(truncated.contains(".workers.dev"));
         let _ = std::fs::remove_file(&path);
     }
 

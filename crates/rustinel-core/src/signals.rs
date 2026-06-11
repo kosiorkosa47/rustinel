@@ -271,8 +271,18 @@ fn collect_denied(lock: &LockfileModel, options: &AnalysisOptions, signals: &mut
     if deny.crates.is_empty() {
         return;
     }
-    for package in lock.registry_packages() {
-        if deny.crates.iter().any(|c| c == &package.id.name) {
+    // Cargo/crates.io treat `-` and `_` as the same crate identity, so a deny of
+    // `foo-bar` must also catch `foo_bar`.
+    let norm = |s: &str| s.replace('-', "_");
+    // ALL packages, not just registry ones: an operator denying a crate by name
+    // means it must not appear at all — including via a git or path dependency
+    // (which is precisely how a denied crate would be smuggled back in).
+    for package in &lock.packages {
+        if deny
+            .crates
+            .iter()
+            .any(|c| norm(c) == norm(&package.id.name))
+        {
             signals.push(RiskSignal {
                 id: "denied_crate".into(),
                 package: package.id.to_string(),
@@ -305,7 +315,12 @@ fn collect_multiple_versions(lock: &LockfileModel, signals: &mut Vec<RiskSignal>
     for (name, packages) in lock.by_name() {
         // Only registry packages can legitimately appear in multiple versions.
         let registry: Vec<&&Package> = packages.iter().filter(|p| !p.id.is_local()).collect();
-        if registry.len() > 1 {
+        // Count distinct VERSIONS, not packages: the same version from two
+        // sources (crates.io + a git pin) is a source question, not a
+        // duplicate-version question, and must not be reported as "2 versions".
+        let distinct: std::collections::BTreeSet<&str> =
+            registry.iter().map(|p| p.id.version.as_str()).collect();
+        if distinct.len() > 1 {
             for package in &registry {
                 signals.push(RiskSignal {
                     id: "multiple_versions_same_crate".into(),
@@ -318,7 +333,7 @@ fn collect_multiple_versions(lock: &LockfileModel, signals: &mut Vec<RiskSignal>
                         lock.path.display().to_string(),
                         format!(
                             "{} distinct versions of `{name}` are present",
-                            registry.len()
+                            distinct.len()
                         ),
                     )],
                     recommendation: "Consider deduplicating dependency versions where feasible."
@@ -591,8 +606,41 @@ fn collect_typosquat(
             continue;
         }
         // Skip very short names — distance-1 collisions are meaningless there.
-        if name.len() < 4 {
+        if name.chars().count() < 4 {
             continue;
+        }
+        // Homoglyph impersonation: a non-ASCII name whose confusable skeleton
+        // reads as a popular crate. crates.io only permits ASCII names, so this
+        // can never be the real crate, and unlike an ASCII typo there is no
+        // innocent near-miss explanation. Checked before download corroboration
+        // because crates.io metadata cannot exist for such a name.
+        if !name.is_ascii() {
+            if let Some(skeleton) = confusable_skeleton(name) {
+                let target = POPULAR_CRATES
+                    .iter()
+                    .copied()
+                    .find(|p| *p == skeleton)
+                    .or_else(|| nearest_popular(&skeleton));
+                if let Some(target) = target {
+                    signals.push(RiskSignal {
+                        id: "possible_typosquat".into(),
+                        package: package.id.to_string(),
+                        severity: Severity::High,
+                        weight: 30,
+                        confidence: 0.95,
+                        evidence: vec![Evidence::new(
+                            "heuristic",
+                            format!(
+                                "crate name `{name}` contains non-ASCII lookalike characters and folds to `{skeleton}`, imitating the popular crate `{target}` — crates.io names are ASCII-only, so this cannot be the real crate"
+                            ),
+                        )],
+                        recommendation:
+                            "Treat as deliberate impersonation: identify where this dependency comes from and remove it."
+                                .into(),
+                    });
+                    continue;
+                }
+            }
         }
         let Some(target) = nearest_popular(name) else {
             continue;
@@ -715,11 +763,77 @@ fn nearest_popular(name: &str) -> Option<&'static str> {
         .find(|p| *p != name && damerau_levenshtein(name, p) == 1)
 }
 
+/// Fold known non-ASCII lookalike characters (homoglyphs) to their ASCII
+/// skeleton. Returns `Some(folded)` only when the name contains at least one
+/// non-ASCII character and EVERY non-ASCII character is a known confusable —
+/// i.e. a human would read the name as an ASCII identifier. Genuinely
+/// non-Latin names (CJK, emoji) return `None`: they imitate nothing.
+pub(crate) fn confusable_skeleton(name: &str) -> Option<String> {
+    if name.is_ascii() {
+        return None;
+    }
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            out.push(confusable_ascii(c)?);
+        }
+    }
+    Some(out)
+}
+
+/// The ASCII letter a non-ASCII character visually imitates, for characters on
+/// the curated confusables list: Cyrillic and Greek lookalikes plus common
+/// precomposed Latin diacritics. Curated from Unicode TR39 pairs that render
+/// near-identically in monospace fonts — not exhaustive, extend as needed.
+fn confusable_ascii(c: char) -> Option<char> {
+    Some(match c {
+        // Cyrillic lowercase lookalikes
+        'а' => 'a', // U+0430
+        'е' | 'ё' | 'є' => 'e',
+        'о' => 'o', // U+043E
+        'р' => 'p', // U+0440
+        'с' => 'c', // U+0441
+        'х' => 'x', // U+0445
+        'у' => 'y', // U+0443
+        'і' | 'ї' => 'i',
+        'ѕ' => 's', // U+0455
+        'ј' => 'j', // U+0458
+        'һ' => 'h', // U+04BB
+        'ԁ' => 'd', // U+0501
+        'ԛ' => 'q', // U+051B
+        'ԝ' => 'w', // U+051D
+        // Greek lowercase lookalikes
+        'ο' => 'o', // omicron
+        'α' => 'a',
+        'ι' => 'i',
+        'ν' => 'v',
+        'ρ' => 'p',
+        // Latin letters with diacritics (precomposed)
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ą' => 'a',
+        'è' | 'é' | 'ê' | 'ë' | 'ę' => 'e',
+        'ì' | 'í' | 'î' | 'ï' | 'ı' => 'i',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
+        'ù' | 'ú' | 'û' | 'ü' => 'u',
+        'ý' | 'ÿ' => 'y',
+        'ñ' | 'ń' => 'n',
+        'ç' | 'ć' => 'c',
+        'ś' | 'š' => 's',
+        'ź' | 'ż' | 'ž' => 'z',
+        'ł' => 'l',
+        _ => return None,
+    })
+}
+
 /// Damerau-Levenshtein edit distance (insert/delete/substitute/transpose).
-/// Operates on bytes — crate names are ASCII.
+/// Operates on `char`s, not bytes: lockfiles are untrusted, and a multi-byte
+/// homoglyph substitution (`serdе` with Cyrillic е) must count as ONE edit —
+/// byte distance would report 2 and hide exactly the most suspicious names
+/// from the distance-1 typosquat check.
 pub(crate) fn damerau_levenshtein(a: &str, b: &str) -> usize {
-    let a = a.as_bytes();
-    let b = b.as_bytes();
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
     let (n, m) = (a.len(), b.len());
     if n == 0 {
         return m;
@@ -752,16 +866,21 @@ pub(crate) fn damerau_levenshtein(a: &str, b: &str) -> usize {
 /// flags — a build script should compile, not phone home or unpack a blob. We
 /// deliberately do NOT flag process execution alone, because legitimate
 /// native-build crates (`cc`, `cmake`, `pkg-config`) spawn the C toolchain.
+// Path/call forms, not bare substrings — `curl-sys`'s build.rs is full of the
+// literal `curl` (`cargo:rustc-link-lib=curl`) and `hyper` appears inside
+// `hypervisor`; a bare-substring match would flag every such build script as
+// High severity. `name::` only matches actual use of the crate as a library.
 const BUILD_RS_NETWORK: &[&str] = &[
-    "reqwest",
-    "ureq",
-    "hyper",
-    "isahc",
-    "curl",
+    "reqwest::",
+    "ureq::",
+    "hyper::",
+    "isahc::",
+    "curl::",
+    "curl_easy_",
     "TcpStream",
-    "std::net",
-    "minreq",
-    "attohttpc",
+    "std::net::",
+    "minreq::",
+    "attohttpc::",
     "tokio::net",
 ];
 const BUILD_RS_PAYLOAD: &[&str] = &[
@@ -1342,11 +1461,12 @@ fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
     for signal in signals.iter_mut() {
         // Advisory matches, yanked status, *suspicious* build scripts, typosquats,
         // ownership changes and the malware / dependency-confusion source signals
-        // are strong evidence, never suppressed by the baseline. Ownership change
-        // and source substitution in particular MUST survive: the xz and
+        // are strong evidence, never suppressed by the baseline. Ownership change,
+        // freshness and source substitution in particular MUST survive: the xz and
         // event-stream takeovers and dependency-confusion attacks all target
-        // ubiquitous, "known-good" crates — silencing them there blinds the signal
-        // to its main target.
+        // ubiquitous, "known-good" crates — and the freshly-published window of a
+        // known-good crate is exactly the post-takeover attack surface. Silencing
+        // these there blinds the signal to its main target.
         if signal.id.starts_with("advisory_")
             || signal.id == "yanked_crate"
             || signal.id == "build_script_suspicious"
@@ -1356,6 +1476,7 @@ fn apply_known_good_baseline(signals: &mut [RiskSignal]) {
             || signal.id == "obfuscated_payload"
             || signal.id == "possible_typosquat"
             || signal.id == "owners_changed"
+            || signal.id == "freshly_published"
             || signal.id == "source_substitution"
             || signal.id == "denied_crate"
         {
@@ -1854,8 +1975,11 @@ fn raw_string_start(b: &[u8], i: usize) -> Option<(usize, usize)> {
 fn char_literal_len(b: &[u8], i: usize) -> usize {
     // b[i] == '\''
     if b.get(i + 1) == Some(&b'\\') {
-        // escaped: find the closing quote within a bounded window
-        let mut p = i + 2;
+        // Escaped: find the closing quote within a bounded window. Start past
+        // the escaped character itself — in `'\''` the byte at i+2 is the
+        // *escaped* quote, not the closing one; matching it would return 3 and
+        // desync the lexer on the leftover quote.
+        let mut p = i + 3;
         let end = (i + 12).min(b.len());
         while p < end {
             if b[p] == b'\'' {
@@ -1993,6 +2117,53 @@ mod tests {
             sig.iter().all(|s| s.id != "possible_typosquat"),
             "established crate must not be flagged as a typosquat"
         );
+    }
+
+    #[test]
+    fn homoglyph_name_is_flagged_high_without_metadata() {
+        // `serdе` with a Cyrillic е (U+0435): byte distance to `serde` is 2, so
+        // the old byte-based check saw nothing. The confusable skeleton folds it
+        // to `serde` — conclusive impersonation, flagged High even offline
+        // (crates.io cannot host a non-ASCII name, so no metadata can exist).
+        let lk = lock(vec![pkg("serd\u{0435}", "1.0.0", false)]);
+        let opts = AnalysisOptions::default();
+        let mut sig = vec![];
+        collect_typosquat(&lk, &opts, &mut sig);
+        let f = sig
+            .iter()
+            .find(|s| s.id == "possible_typosquat")
+            .expect("homoglyph impersonation must be flagged");
+        assert_eq!(f.severity, Severity::High);
+        assert!(f.evidence[0].summary.contains("serde"));
+
+        // Full homoglyph swap (every vowel Cyrillic) — distance > 1, only the
+        // skeleton fold can catch it.
+        let lk = lock(vec![pkg("t\u{043E}ki\u{043E}", "1.0.0", false)]); // tоkiо
+        let mut sig = vec![];
+        collect_typosquat(&lk, &opts, &mut sig);
+        assert!(
+            sig.iter()
+                .any(|s| s.id == "possible_typosquat" && s.severity == Severity::High),
+            "full homoglyph swap of `tokio` must be flagged"
+        );
+
+        // A genuinely non-Latin name imitates nothing — must stay silent.
+        let lk = lock(vec![pkg(
+            "\u{65E5}\u{672C}\u{8A9E}\u{30C4}",
+            "1.0.0",
+            false,
+        )]);
+        let mut sig = vec![];
+        collect_typosquat(&lk, &opts, &mut sig);
+        assert!(
+            sig.iter().all(|s| s.id != "possible_typosquat"),
+            "non-confusable non-Latin name must not be flagged"
+        );
+
+        // Char-level distance: `serdé` (precomposed é) folds via the diacritic
+        // table; one-edit Cyrillic substitution also works through the normal
+        // distance-1 path now that distance is char-based.
+        assert_eq!(damerau_levenshtein("serd\u{0435}", "serde"), 1);
     }
 
     #[test]
