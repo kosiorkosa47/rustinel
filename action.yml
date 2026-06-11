@@ -63,12 +63,19 @@ runs:
       run: |
         set -e
         if command -v cargo-rustinel >/dev/null 2>&1; then exit 0; fi
-        # 1. Published crate — fast once cargo-rustinel is on crates.io.
-        if cargo install cargo-rustinel --locked; then exit 0; fi
-        # 2. Build from this repository at the exact ref the action was invoked
-        #    with (e.g. `@v1`), so an external consumer is fully self-contained —
-        #    no crates.io and no `crates/rustinel-cli` in *their* checkout needed.
         REF="${{ github.action_ref }}"
+        # The install must honor the ref the consumer PINNED — an unpinned
+        # `cargo install cargo-rustinel` would silently run whatever is newest
+        # on crates.io inside the consumer's CI, with their token in scope.
+        # 1. Full-semver tag (`@v0.1.1`) -> that exact version from crates.io.
+        case "$REF" in
+          v[0-9]*.[0-9]*.[0-9]*)
+            if cargo install cargo-rustinel --version "${REF#v}" --locked; then exit 0; fi
+            ;;
+        esac
+        # 2. Anything else (floating `@v0`, a branch, a SHA) — or a crates.io
+        #    miss — builds from this repository at the exact invoked ref, so the
+        #    consumer is fully self-contained and gets precisely what they pinned.
         cargo install --git https://github.com/kosiorkosa47/rustinel \
           ${REF:+--rev "$REF"} cargo-rustinel --locked
 

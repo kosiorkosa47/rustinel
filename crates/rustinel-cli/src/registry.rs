@@ -70,11 +70,14 @@ pub fn fetch_yanked(lock: &LockfileModel) -> BTreeSet<String> {
         ))
         .build();
 
+    let mut failed = 0usize;
+    let mut attempted = 0usize;
     for (queried, (name, versions)) in wanted.iter().enumerate() {
         if queried >= MAX_CRATES {
             eprintln!("rustinel: metadata lookup capped at {MAX_CRATES} crates");
             break;
         }
+        attempted += 1;
         if let Some(body) = fetch_index(&agent, name) {
             for line in body.lines() {
                 if let Ok(entry) = serde_json::from_str::<IndexLine>(line) {
@@ -83,7 +86,17 @@ pub fn fetch_yanked(lock: &LockfileModel) -> BTreeSet<String> {
                     }
                 }
             }
+        } else {
+            failed += 1;
         }
+    }
+    // Degrading silently would let a rate-limited/offline run report "no yanked
+    // versions" with full confidence — say loudly that the answer is partial.
+    if failed > 0 {
+        eprintln!(
+            "rustinel: warning: {failed} of {attempted} crates.io index lookups failed; \
+             yanked-version results are PARTIAL (network issue or rate limit?)"
+        );
     }
     yanked
 }
@@ -224,6 +237,8 @@ fn fetch_set(wanted: &[(String, String)]) -> BTreeMap<String, CrateMetadata> {
         ))
         .build();
     let today = today_epoch_day();
+    let mut failed = 0usize;
+    let mut attempted = 0usize;
     for (i, (name, versions)) in by_name.iter().enumerate() {
         if i >= MAX_META {
             // Never drop silently: tell the user the metadata is partial.
@@ -237,7 +252,9 @@ fn fetch_set(wanted: &[(String, String)]) -> BTreeMap<String, CrateMetadata> {
         if i > 0 {
             std::thread::sleep(Duration::from_millis(POLITE_DELAY_MS));
         }
+        attempted += 1;
         let Some(resp) = fetch_crate(&agent, name) else {
+            failed += 1;
             continue;
         };
         for version in versions {
@@ -256,6 +273,12 @@ fn fetch_set(wanted: &[(String, String)]) -> BTreeMap<String, CrateMetadata> {
                 },
             );
         }
+    }
+    if failed > 0 {
+        eprintln!(
+            "rustinel: warning: {failed} of {attempted} crates.io metadata lookups failed; \
+             freshness/trust signals are PARTIAL (network issue or rate limit?)"
+        );
     }
     out
 }
@@ -302,6 +325,8 @@ pub fn fetch_owners(names: &[String]) -> BTreeMap<String, Vec<String>> {
             names.len()
         );
     }
+    let mut failed = 0usize;
+    let mut attempted = 0usize;
     for (i, name) in names.iter().enumerate() {
         if i >= MAX_CRATES {
             break;
@@ -309,9 +334,18 @@ pub fn fetch_owners(names: &[String]) -> BTreeMap<String, Vec<String>> {
         if i > 0 {
             std::thread::sleep(Duration::from_millis(POLITE_DELAY_MS));
         }
+        attempted += 1;
         if let Some(owners) = fetch_one_owners(&agent, name) {
             out.insert((*name).clone(), owners);
+        } else {
+            failed += 1;
         }
+    }
+    if failed > 0 {
+        eprintln!(
+            "rustinel: warning: ownership lookup failed for {failed} of {attempted} crates; \
+             the ownership baseline/check is PARTIAL"
+        );
     }
     out
 }
