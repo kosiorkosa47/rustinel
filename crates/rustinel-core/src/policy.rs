@@ -122,11 +122,19 @@ struct Effective {
     allow_crates: Vec<String>,
 }
 
+/// The built-in profile names. Anything else in `[profile] name` is a hard
+/// parse error: a typo (`"Strict"`, `"sctrict"`) silently degrading to
+/// `balanced` would turn "fail on exfil" into a review note.
+pub const PROFILES: &[&str] = &["strict", "balanced", "permissive"];
+
 impl Effective {
     fn from(policy: Option<&Policy>) -> Self {
+        // Lowercased so the malware-severity arms (`eff.profile == "strict"`)
+        // behave identically however the file spells the name; unknown names
+        // are rejected earlier, in `parse_policy_toml`.
         let profile_name = policy
             .and_then(|p| p.profile.as_ref())
-            .map(|p| p.name.clone())
+            .map(|p| p.name.to_lowercase())
             .unwrap_or_else(|| "balanced".into());
         let mut eff = Self::defaults_for(&profile_name);
 
@@ -243,7 +251,9 @@ impl Effective {
                 license_deny: vec!["AGPL-3.0".into()],
                 ..base
             },
-            _ => base, // "balanced" and any custom name
+            // "balanced". Unknown names are rejected in `parse_policy_toml`,
+            // so this arm cannot silently swallow a typo.
+            _ => base,
         }
     }
 }
@@ -318,6 +328,15 @@ pub fn evaluate(
                 violations.push(format!("{} ({}) on `{}`", advisory_id, sev, signal.package));
             } else if eff.adv_warn_on.iter().any(|s| s.eq_ignore_ascii_case(&sev)) || allowlisted {
                 warnings.push(format!("{} ({}) on `{}`", advisory_id, sev, signal.package));
+            } else {
+                // A severity covered by neither fail_on nor warn_on must not
+                // vanish: with a narrow custom policy (fail_on = ["critical"]
+                // and nothing else) every high advisory would otherwise be
+                // silently dropped. Uncovered severities degrade to warnings.
+                warnings.push(format!(
+                    "{} ({}) on `{}` — severity not listed in fail_on/warn_on, surfaced as a warning",
+                    advisory_id, sev, signal.package
+                ));
             }
             continue;
         }
@@ -628,7 +647,11 @@ fn license_family(id: &str) -> &str {
 }
 
 /// True if the SPDX expression can be satisfied when each license leaf is
-/// evaluated by `pred`. Falls back to "any token satisfies pred" on parse error.
+/// evaluated by `pred`. Falls back to "EVERY token satisfies pred" on parse
+/// error — the conservative direction for both callers: a malformed expression
+/// containing a denied license fails the deny check (an OR fallback would let
+/// `MIT & GPL-3.0` ship GPL because "MIT is fine"), and an expression with any
+/// non-allowlisted token fails the allow check.
 pub(crate) fn satisfiable(expr: &str, pred: &dyn Fn(&str) -> bool) -> bool {
     let toks = tokenize_spdx(expr);
     if toks.is_empty() {
@@ -640,9 +663,36 @@ pub(crate) fn satisfiable(expr: &str, pred: &dyn Fn(&str) -> bool) -> bool {
     };
     match p.parse_expr(pred) {
         Some(v) if p.pos == p.toks.len() => v,
-        // Malformed expression: conservative OR over the license tokens.
-        _ => toks.iter().any(|t| matches!(t, SpdxTok::Lic(l) if pred(l))),
+        // Malformed expression: conservative AND over the license tokens.
+        _ => toks.iter().all(|t| match t {
+            SpdxTok::Lic(l) => pred(l),
+            _ => true,
+        }),
     }
+}
+
+/// Structural validity of an SPDX 2.3 license *expression* as written: only
+/// idstring tokens, the standard operators (AND / OR / WITH) and parentheses.
+/// Legacy separators (`/`, `&`, `,`) make the raw string invalid here even
+/// though the policy engine evaluates them leniently — SBOM exporters must not
+/// emit them as expressions (validators reject the whole document).
+pub(crate) fn is_spdx_expression(expr: &str) -> bool {
+    if expr.is_empty()
+        || !expr.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_' | '(' | ')' | ' ')
+        })
+    {
+        return false;
+    }
+    let toks = tokenize_spdx(expr);
+    if toks.is_empty() {
+        return false;
+    }
+    let mut p = SpdxParser {
+        toks: &toks,
+        pos: 0,
+    };
+    p.parse_expr(&|_| true).is_some() && p.pos == toks.len()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -678,6 +728,13 @@ fn tokenize_spdx(expr: &str) -> Vec<SpdxTok> {
             ')' => {
                 flush(&mut word, &mut toks);
                 toks.push(SpdxTok::RParen);
+            }
+            // Cargo's legacy dual-license separator (`MIT/Apache-2.0`) means OR.
+            // Not valid SPDX, but extremely common in older manifests — parsing
+            // it properly beats sending it to the conservative fallback.
+            '/' => {
+                flush(&mut word, &mut toks);
+                toks.push(SpdxTok::Or);
             }
             c if c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '+' || c == '_' => {
                 word.push(c);
@@ -752,7 +809,21 @@ impl<'a> SpdxParser<'a> {
 }
 
 pub fn parse_policy_toml(input: &str) -> Result<Policy, RustinelError> {
-    toml::from_str(input).map_err(|e| RustinelError::InvalidPolicy(e.to_string()))
+    let policy: Policy =
+        toml::from_str(input).map_err(|e| RustinelError::InvalidPolicy(e.to_string()))?;
+    // A misspelled profile silently degrading to `balanced` would weaken the
+    // gate without anyone noticing — reject unknown names loudly instead.
+    if let Some(profile) = &policy.profile {
+        let name = profile.name.to_lowercase();
+        if !PROFILES.contains(&name.as_str()) {
+            return Err(RustinelError::InvalidPolicy(format!(
+                "unknown profile `{}` (expected one of: {})",
+                profile.name,
+                PROFILES.join(", ")
+            )));
+        }
+    }
+    Ok(policy)
 }
 
 #[cfg(test)]
@@ -940,6 +1011,81 @@ mod tests {
         assert_eq!(
             license_verdict("Apache-2.0 WITH LLVM-exception", &allow, &deny),
             LicenseVerdict::Ok
+        );
+        // Cargo's legacy `/` separator means OR — `MIT/Apache-2.0` must behave
+        // exactly like `MIT OR Apache-2.0`, not fall to the malformed path.
+        assert_eq!(
+            license_verdict("MIT/Apache-2.0", &allow, &deny),
+            LicenseVerdict::Ok
+        );
+        assert_eq!(
+            license_verdict("MIT/GPL-3.0", &[], &deny),
+            LicenseVerdict::Ok // dual-licensed: the MIT branch escapes the deny
+        );
+        // MALFORMED expression with a denied license must fail CLOSED: the old
+        // OR-fallback read `MIT & GPL-3.0` as "MIT is fine -> OK" and shipped
+        // GPL-3.0 past fail_on_denied_license.
+        assert_eq!(
+            license_verdict("MIT & GPL-3.0", &[], &deny),
+            LicenseVerdict::Denied
+        );
+        assert_eq!(
+            license_verdict("MIT , GPL-3.0", &[], &deny),
+            LicenseVerdict::Denied
+        );
+    }
+
+    #[test]
+    fn unknown_profile_is_rejected_and_case_folded() {
+        // Typo / wrong case must never silently degrade to `balanced`.
+        assert!(parse_policy_toml("[profile]\nname = \"sctrict\"\n").is_err());
+        assert!(parse_policy_toml("[profile]\nname = \"Strict\"\n").is_ok());
+        // And the case-folded profile actually drives the strict arms.
+        let policy = parse_policy_toml("[profile]\nname = \"Strict\"\n").unwrap();
+        let sig = RiskSignal {
+            id: "suspicious_source_exfil".into(),
+            package: "evil@1.0.0".into(),
+            severity: Severity::High,
+            weight: 30,
+            confidence: 0.9,
+            evidence: vec![Evidence::new("source", "exfil fingerprint")],
+            recommendation: String::new(),
+        };
+        let d = evaluate(
+            &risk(30, 30),
+            std::slice::from_ref(&sig),
+            None,
+            Some(&policy),
+        )
+        .unwrap();
+        assert_eq!(
+            d.decision,
+            Decision::Fail,
+            "\"Strict\" (capitalized) must behave as strict, not balanced"
+        );
+    }
+
+    #[test]
+    fn uncovered_advisory_severity_degrades_to_warning() {
+        // fail_on = ["critical"] with default warn_on (medium/low): a HIGH
+        // advisory is covered by neither list and must surface as a warning,
+        // never disappear.
+        let policy = parse_policy_toml("[advisories]\nfail_on = [\"critical\"]\n").unwrap();
+        let sig = RiskSignal {
+            id: "advisory_RUSTSEC-2099-0001".into(),
+            package: "vuln@1.0.0".into(),
+            severity: Severity::High,
+            weight: 30,
+            confidence: 1.0,
+            evidence: vec![],
+            recommendation: String::new(),
+        };
+        let d = evaluate(&risk(0, 0), std::slice::from_ref(&sig), None, Some(&policy)).unwrap();
+        assert_eq!(d.decision, Decision::Warn);
+        assert!(
+            d.warnings.iter().any(|w| w.contains("RUSTSEC-2099-0001")),
+            "uncovered severity dropped silently: {:?}",
+            d.warnings
         );
     }
 

@@ -91,11 +91,20 @@ pub fn parse_lockfile(path: &Path) -> Result<LockfileModel, RustinelError> {
 /// untrusted lockfiles, so a dependency panic must never crash us. Only the
 /// `cargo-lock` call is wrapped in `catch_unwind` (our own mapping code stays
 /// outside the closure, so genuine bugs there remain observable), and the panic
-/// hook is silenced for the duration so the output stays clean. Lockfile parsing
-/// is single-threaded, so the temporary global hook swap cannot race another
-/// thread's panic.
+/// hook is silenced for the duration so the output stays clean. The panic hook
+/// is process-global state, and rustinel-core is a *library*: an embedder may
+/// parse lockfiles from several threads, so the swap-parse-restore sequence is
+/// serialized behind a mutex — otherwise two interleaved parses could restore
+/// the hooks in the wrong order and permanently silence all panic output.
 fn parse_cargo_lock(content: &str) -> Result<cargo_lock::Lockfile, String> {
     use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::Mutex;
+    static HOOK_SWAP: Mutex<()> = Mutex::new(());
+    // A poisoned lock would mean a panic escaped the catch below (it cannot);
+    // proceeding with the inner guard is still sound.
+    let _guard = HOOK_SWAP
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let result = catch_unwind(AssertUnwindSafe(|| content.parse::<cargo_lock::Lockfile>()));

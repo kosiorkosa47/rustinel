@@ -102,10 +102,20 @@ impl AdvisoryDb {
         let mut stack: Vec<(PathBuf, usize)> = vec![(dir.to_path_buf(), 0)];
         let mut visited = 0usize;
         while let Some((d, depth)) = stack.pop() {
-            let entries = std::fs::read_dir(&d).map_err(|e| RustinelError::AdvisoryDb {
-                path: d.clone(),
-                message: e.to_string(),
-            })?;
+            let entries = match std::fs::read_dir(&d) {
+                Ok(entries) => entries,
+                // The DB root stays a hard error: an unreadable database must
+                // not silently degrade to "no advisories" (fail-open).
+                Err(e) if depth == 0 => {
+                    return Err(RustinelError::AdvisoryDb {
+                        path: d.clone(),
+                        message: e.to_string(),
+                    })
+                }
+                // A single unreadable subdirectory is skipped, consistent with
+                // the file-level policy (unreadable files are skipped too).
+                Err(_) => continue,
+            };
             for entry in entries.flatten() {
                 if visited >= crate::safety::MAX_DIR_ENTRIES {
                     advisories.sort_by(|a, b| a.id.cmp(&b.id));
@@ -278,6 +288,11 @@ fn req_matches(raw: &str, version: &Version) -> bool {
 
 /// Evaluate a single comparator against a version using bare `Version` ordering
 /// (no prerelease-exclusion), matching rustsec's OSV range comparison.
+///
+/// All arms are partial-aware, mirroring semver's own component-wise semantics:
+/// `>1.2` means "beyond the 1.2 series" (1.3.0+), NOT `>1.2.0` — zero-filling
+/// the missing components would wrongly match `1.2.5-rc.1` against `>1.2` and
+/// flip an affected prerelease to "patched" (a false negative).
 fn comparator_matches_bare(c: &Comparator, v: &Version) -> bool {
     let base = Version {
         major: c.major,
@@ -287,29 +302,11 @@ fn comparator_matches_bare(c: &Comparator, v: &Version) -> bool {
         build: BuildMetadata::EMPTY,
     };
     match c.op {
-        Op::Greater => *v > base,
-        Op::GreaterEq => *v >= base,
-        Op::Less => *v < base,
-        Op::LessEq => *v <= base,
-        // Exact comparators are partial-aware: `=1.2` means any `1.2.x`, `=1`
-        // means any `1.x.y` — matching semver's own `=` family semantics, here
-        // applied with bare prerelease ordering like the other arms. (Naive
-        // `*v == base` would zero-fill `=1.2` to `1.2.0` and miss `1.2.5-rc.1`.)
-        Op::Exact => {
-            if v.major != c.major {
-                return false;
-            }
-            let Some(minor) = c.minor else {
-                return true;
-            };
-            if v.minor != minor {
-                return false;
-            }
-            let Some(patch) = c.patch else {
-                return true;
-            };
-            v.patch == patch && v.pre == c.pre
-        }
+        Op::Greater => matches_greater_bare(c, v),
+        Op::GreaterEq => matches_exact_bare(c, v) || matches_greater_bare(c, v),
+        Op::Less => matches_less_bare(c, v),
+        Op::LessEq => matches_exact_bare(c, v) || matches_less_bare(c, v),
+        Op::Exact => matches_exact_bare(c, v),
         // Caret (`^0.6.4`) appears in backport-patched ranges; expand to its
         // `[base, upper)` interval and compare with bare ordering.
         Op::Caret => *v >= base && *v < caret_upper(c),
@@ -320,6 +317,67 @@ fn comparator_matches_bare(c: &Comparator, v: &Version) -> bool {
         }
         .matches(v),
     }
+}
+
+/// Partial-aware `=`: `=1.2` means any `1.2.x`, `=1` means any `1.x.y` —
+/// semver's `=` family semantics with bare prerelease comparison at the end.
+/// (Naive `*v == base` would zero-fill `=1.2` to `1.2.0` and miss `1.2.5-rc.1`.)
+fn matches_exact_bare(c: &Comparator, v: &Version) -> bool {
+    if v.major != c.major {
+        return false;
+    }
+    let Some(minor) = c.minor else {
+        return true;
+    };
+    if v.minor != minor {
+        return false;
+    }
+    let Some(patch) = c.patch else {
+        return true;
+    };
+    v.patch == patch && v.pre == c.pre
+}
+
+/// Partial-aware `>`, ported from semver's `matches_greater`. The final
+/// prerelease comparison uses `Prerelease`'s own ordering, which already treats
+/// an empty prerelease as greater than any prerelease (bare semantics).
+fn matches_greater_bare(c: &Comparator, v: &Version) -> bool {
+    if v.major != c.major {
+        return v.major > c.major;
+    }
+    let Some(minor) = c.minor else {
+        return false;
+    };
+    if v.minor != minor {
+        return v.minor > minor;
+    }
+    let Some(patch) = c.patch else {
+        return false;
+    };
+    if v.patch != patch {
+        return v.patch > patch;
+    }
+    v.pre > c.pre
+}
+
+/// Partial-aware `<`, ported from semver's `matches_less` (see above).
+fn matches_less_bare(c: &Comparator, v: &Version) -> bool {
+    if v.major != c.major {
+        return v.major < c.major;
+    }
+    let Some(minor) = c.minor else {
+        return false;
+    };
+    if v.minor != minor {
+        return v.minor < minor;
+    }
+    let Some(patch) = c.patch else {
+        return false;
+    };
+    if v.patch != patch {
+        return v.patch < patch;
+    }
+    v.pre < c.pre
 }
 
 /// Upper (exclusive) bound of a caret comparator, per Cargo's caret rules.
@@ -449,11 +507,119 @@ fn extract_md_title(content: &str) -> Option<String> {
     None
 }
 
-/// Extract the numeric base score if the CVSS field is a bare number. Full CVSS
-/// vector parsing is intentionally not implemented; vectors fall back to the
-/// severity heuristics in [`Advisory::severity`].
+/// Extract the CVSS base score: either a bare number, or computed from a
+/// CVSS v3.0/v3.1 vector string — which is what the RustSec database actually
+/// stores (`CVSS:3.1/AV:N/...`). Without vector support every real advisory
+/// would fall to the no-CVSS default (High), silently flattening Criticals.
 fn parse_cvss_base_score(cvss: &str) -> Option<f32> {
-    cvss.trim().parse::<f32>().ok()
+    let cvss = cvss.trim();
+    if let Ok(n) = cvss.parse::<f32>() {
+        return Some(n);
+    }
+    cvss_v3_base_score(cvss)
+}
+
+/// Compute the CVSS v3.x base score from a vector string, per the first.org
+/// v3.1 specification. v3.0 vectors use the same equations (the v3.1 revision
+/// only clarified rounding). Returns `None` for anything that is not a complete
+/// v3.x base vector, so unknown formats fall back to the High default.
+fn cvss_v3_base_score(vector: &str) -> Option<f32> {
+    let rest = vector
+        .strip_prefix("CVSS:3.1/")
+        .or_else(|| vector.strip_prefix("CVSS:3.0/"))?;
+
+    let (mut av, mut ac, mut pr, mut ui, mut scope, mut c, mut i, mut a) =
+        (None, None, None, None, None, None, None, None);
+    for metric in rest.split('/') {
+        let (key, val) = metric.split_once(':')?;
+        match key {
+            "AV" => {
+                av = Some(match val {
+                    "N" => 0.85,
+                    "A" => 0.62,
+                    "L" => 0.55,
+                    "P" => 0.2,
+                    _ => return None,
+                })
+            }
+            "AC" => {
+                ac = Some(match val {
+                    "L" => 0.77,
+                    "H" => 0.44,
+                    _ => return None,
+                })
+            }
+            "PR" => pr = Some(val.to_string()),
+            "UI" => {
+                ui = Some(match val {
+                    "N" => 0.85,
+                    "R" => 0.62,
+                    _ => return None,
+                })
+            }
+            "S" => {
+                scope = Some(match val {
+                    "U" => false,
+                    "C" => true,
+                    _ => return None,
+                })
+            }
+            "C" => c = cia(val),
+            "I" => i = cia(val),
+            "A" => a = cia(val),
+            // Temporal/environmental metrics may follow the base vector; ignore.
+            _ => {}
+        }
+    }
+    let (av, ac, pr, ui, scope, c, i, a) = (av?, ac?, pr?, ui?, scope?, c?, i?, a?);
+    // PR weights depend on Scope.
+    let pr = match (pr.as_str(), scope) {
+        ("N", _) => 0.85,
+        ("L", false) => 0.62,
+        ("L", true) => 0.68,
+        ("H", false) => 0.27,
+        ("H", true) => 0.5,
+        _ => return None,
+    };
+
+    let iss: f64 = 1.0 - (1.0 - c) * (1.0 - i) * (1.0 - a);
+    let impact = if scope {
+        7.52 * (iss - 0.029) - 3.25 * (iss - 0.02).powi(15)
+    } else {
+        6.42 * iss
+    };
+    if impact <= 0.0 {
+        return Some(0.0);
+    }
+    let exploitability = 8.22 * av * ac * pr * ui;
+    let score = if scope {
+        (1.08 * (impact + exploitability)).min(10.0)
+    } else {
+        (impact + exploitability).min(10.0)
+    };
+    Some(cvss_roundup(score))
+}
+
+/// C/I/A metric weight.
+fn cia(val: &str) -> Option<f64> {
+    match val {
+        "H" => Some(0.56),
+        "L" => Some(0.22),
+        "N" => Some(0.0),
+        _ => None,
+    }
+}
+
+/// The v3.1 `Roundup` function: the smallest number with one decimal place at
+/// or above the input, computed via integer arithmetic to dodge floating-point
+/// artifacts (this is the spec's own pseudocode, Appendix A).
+fn cvss_roundup(x: f64) -> f32 {
+    let int_input = (x * 100_000.0).round() as i64;
+    if int_input % 10_000 == 0 {
+        (int_input as f64 / 100_000.0) as f32
+    } else {
+        (((int_input / 10_000) + 1) as f64 / 10.0) as f32
+    }
 }
 
 #[cfg(test)]
@@ -516,6 +682,53 @@ mod tests {
         assert_eq!(a.severity(), Severity::Medium);
         a.cvss_score = None;
         assert_eq!(a.severity(), Severity::High);
+    }
+
+    #[test]
+    fn partial_comparators_use_series_semantics_for_prereleases() {
+        // `>1.2` means "beyond the 1.2 series" (semver semantics), not `>1.2.0`.
+        // Zero-filling would treat 1.2.5-rc.1 as patched — a false negative.
+        let a = adv(&[">1.2"], &[]);
+        assert!(
+            a.affects(&Version::parse("1.2.5-rc.1").unwrap()),
+            "1.2.5-rc.1 is inside the 1.2 series and must NOT count as patched by >1.2"
+        );
+        assert!(!a.affects(&Version::parse("1.3.0-rc.1").unwrap()));
+        // `<0.5` partial in an unaffected range, prerelease inside the bound.
+        let b = adv(&[], &["<0.5"]);
+        assert!(!b.affects(&Version::parse("0.4.9-beta.1").unwrap()));
+        assert!(b.affects(&Version::parse("0.5.0-beta.1").unwrap()));
+    }
+
+    #[test]
+    fn cvss_vector_base_scores_match_first_org() {
+        // Reference scores from the first.org v3.1 calculator. RustSec stores
+        // vectors, not bare numbers — these MUST parse or every Critical
+        // silently flattens to the no-CVSS default (High).
+        let cases = [
+            ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H", 7.5),
+            ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", 9.8),
+            ("CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H", 9.9),
+            ("CVSS:3.0/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:N/A:N", 5.3),
+            ("CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N", 1.8),
+            ("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N", 0.0),
+        ];
+        for (vector, expected) in cases {
+            let got =
+                parse_cvss_base_score(vector).unwrap_or_else(|| panic!("{vector} must parse"));
+            assert!(
+                (got - expected).abs() < 0.05,
+                "{vector}: got {got}, expected {expected}"
+            );
+        }
+        // Bare numbers still parse; garbage and truncated vectors do not.
+        assert_eq!(parse_cvss_base_score("7.5"), Some(7.5));
+        assert_eq!(parse_cvss_base_score("CVSS:3.1/AV:N"), None);
+        assert_eq!(parse_cvss_base_score("not-a-vector"), None);
+        // A 9.8 vector must drive Critical through the severity ladder.
+        let mut a = adv(&[], &[]);
+        a.cvss_score = parse_cvss_base_score("CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H");
+        assert_eq!(a.severity(), Severity::Critical);
     }
 
     #[test]
