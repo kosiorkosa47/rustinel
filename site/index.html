@@ -34,6 +34,10 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
+/* The document never pans sideways: wide content (pre, tables) scrolls inside
+   its own box. `clip` rather than `hidden` so the sticky TOC keeps working;
+   the `hidden` declaration before it is the fallback for older engines. */
+html,body{overflow-x:hidden;overflow-x:clip}
 body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.618}
 a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px}
 a:hover{color:var(--accent);text-decoration-color:var(--accent)}
