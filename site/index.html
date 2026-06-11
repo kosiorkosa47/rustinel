@@ -14,6 +14,15 @@
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23191b1f'/%3E%3Cpath d='M10 23V9h7a5 5 0 0 1 2.4 9.4L23 23h-4.2l-3-4H13.6v4Zm3.6-7.4H17a1.6 1.6 0 1 0 0-3.2h-3.4Z' fill='%23f7f6f2'/%3E%3C/svg%3E">
 <style>
+/* ----------------------------------------------------------------------------
+   Metric system: the golden ratio.
+   - type scale, steps of sqrt(phi)=1.272 .. 10 / 13 / 16 / 21 / 26 / 42 px
+   - spacing: Fibonacci px only .. 8 / 13 / 21 / 34 / 55 / 89
+   - column splits: 1:phi^2 (toc/article, metrics), phi:1 (code/notes),
+     1:phi (cargo-audit/rustinel comparison)
+   - body leading: phi = 1.618; content measure 62ch (~100/phi);
+     content width 987px and breakpoints 610/987 are Fibonacci numbers
+---------------------------------------------------------------------------- */
 :root{
   --paper:#f7f6f2; --ink:#191b1f; --muted:#585f6b; --faint:#8a8f99;
   --rule:#d9d6cc; --rule-soft:#e7e4db; --inset:#efede6;
@@ -25,124 +34,127 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.618}
 a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px}
 a:hover{color:var(--accent);text-decoration-color:var(--accent)}
 ::selection{background:#e9d7c9}
 code{font-family:var(--mono);font-size:.93em}
 p code,li code,td code,dt code{background:var(--inset);border:1px solid var(--rule-soft);padding:.05em .3em;border-radius:2px;white-space:nowrap}
-.page{max-width:1100px;margin:0 auto;padding:0 28px}
+.page{max-width:1055px;margin:0 auto;padding:0 34px}
 
 /* ---- top rule + masthead ------------------------------------------------ */
 .topline{border-bottom:1px solid var(--ink)}
-.topline .page{display:flex;flex-wrap:wrap;align-items:baseline;gap:18px;padding:10px 28px;font-family:var(--mono);font-size:12px;color:var(--muted)}
-@media(max-width:720px){.topline .tagline{display:none}}
+.topline .page{display:flex;flex-wrap:wrap;align-items:baseline;gap:21px;padding:8px 34px;font-family:var(--mono);font-size:13px;color:var(--muted)}
+@media(max-width:610px){.topline .tagline{display:none}}
 .topline .name{color:var(--ink);font-weight:600}
-.topline .right{margin-left:auto;display:flex;gap:18px}
+.topline .right{margin-left:auto;display:flex;gap:21px}
 .topline a{text-decoration:none}
 .topline a:hover{text-decoration:underline}
 
-.masthead{padding:54px 0 0;border-bottom:1px solid var(--ink)}
-.masthead h1{font-size:clamp(30px,4.6vw,46px);font-weight:650;letter-spacing:-.02em;line-height:1.12;max-width:24ch}
-.masthead .sub{margin:18px 0 0;font-size:16.5px;color:var(--muted);max-width:62ch}
+.masthead{padding:55px 0 0;border-bottom:1px solid var(--ink)}
+.masthead h1{font-size:clamp(26px,4.2vw,42px);font-weight:650;letter-spacing:-.02em;line-height:1.272;max-width:26ch}
+.masthead .sub{margin:21px 0 0;font-size:21px;line-height:1.618;color:var(--muted);max-width:62ch}
 .masthead .sub strong{color:var(--ink);font-weight:600}
-.specrow{display:flex;flex-wrap:wrap;margin-top:38px;border-top:1px solid var(--rule);font-family:var(--mono);font-size:12.5px}
-.specrow>div{padding:12px 28px 12px 0;margin-right:28px;border-right:1px solid var(--rule)}
+.specrow{display:flex;flex-wrap:wrap;margin-top:55px;border-top:1px solid var(--rule);font-family:var(--mono);font-size:13px}
+.specrow>div{padding:13px 34px 13px 0;margin-right:34px;border-right:1px solid var(--rule)}
 .specrow>div:last-child{border-right:0;margin-right:0}
-.specrow .k{color:var(--faint);display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
+.specrow .k{color:var(--faint);display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px}
 .specrow a{text-decoration:none;border-bottom:1px solid var(--rule)}
-.installline{display:flex;align-items:center;gap:14px;padding:16px 0 18px;border-top:1px solid var(--rule);font-family:var(--mono);font-size:14px}
+.installline{display:flex;align-items:center;gap:13px;padding:21px 0;border-top:1px solid var(--rule);font-family:var(--mono);font-size:14px}
 .installline .prompt{color:var(--faint)}
-.installline button{font-family:var(--mono);font-size:11.5px;color:var(--muted);background:none;border:1px solid var(--rule);padding:3px 10px;cursor:pointer;border-radius:2px}
+.installline button{font-family:var(--mono);font-size:11px;color:var(--muted);background:none;border:1px solid var(--rule);padding:3px 13px;cursor:pointer;border-radius:2px}
 .installline button:hover{border-color:var(--ink);color:var(--ink)}
 
-/* ---- layout: toc + body ------------------------------------------------- */
-.layout{display:grid;grid-template-columns:208px 1fr;gap:56px;padding-top:8px}
+/* ---- layout: toc + body, split 1 : phi^2 -------------------------------- */
+.layout{display:grid;grid-template-columns:1fr 2.618fr;gap:55px;padding-top:13px}
 /* Grid/flex children default to min-width:auto, so a wide <pre> would stretch
    its track past the viewport instead of scrolling internally. */
 .layout>article,.twocol>*,.installcols>*,.compare>*{min-width:0}
-@media(max-width:880px){.layout{grid-template-columns:1fr}.toc{display:none}}
-.toc{position:sticky;top:0;align-self:start;padding-top:44px;font-family:var(--mono);font-size:12.5px}
+@media(max-width:987px){.layout{grid-template-columns:1fr}.toc{display:none}}
+.toc{position:sticky;top:0;align-self:start;padding-top:55px;font-family:var(--mono);font-size:13px}
 .toc ol{list-style:none}
 .toc li{border-bottom:1px solid var(--rule-soft)}
-.toc a{display:flex;gap:10px;padding:8px 2px;text-decoration:none;color:var(--muted)}
+.toc a{display:flex;gap:13px;padding:8px 2px;text-decoration:none;color:var(--muted)}
 .toc a:hover{color:var(--accent)}
 .toc .n{color:var(--faint)}
 
-article section{padding:44px 0 50px;border-bottom:1px solid var(--rule)}
+article section{padding:55px 0;border-bottom:1px solid var(--rule)}
 article section:last-of-type{border-bottom:0}
-.sechead{display:flex;align-items:baseline;gap:16px;margin-bottom:10px}
+.sechead{display:flex;align-items:baseline;gap:21px;margin-bottom:13px}
 .sechead .n{font-family:var(--mono);font-size:13px;color:var(--accent)}
-h2{font-size:21px;font-weight:650;letter-spacing:-.01em}
-.lede{color:var(--muted);max-width:68ch;margin:8px 0 26px}
+h2{font-size:26px;font-weight:650;letter-spacing:-.01em;line-height:1.272}
+.lede{color:var(--muted);max-width:62ch;margin:13px 0 34px}
 .lede a{color:var(--ink)}
-h3{font-size:15px;font-weight:650;margin:26px 0 8px}
+h3{font-size:16px;font-weight:650;margin:34px 0 13px;line-height:1.272}
 
 /* ---- tables (the workhorse) --------------------------------------------- */
-table{width:100%;border-collapse:collapse;font-size:13.5px;border-top:2px solid var(--ink)}
-th,td{text-align:left;vertical-align:top;padding:10px 14px 10px 0;border-bottom:1px solid var(--rule)}
-thead th{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--ink);padding-top:8px;padding-bottom:8px}
-td.sig{font-family:var(--mono);font-size:12.5px;white-space:nowrap;color:var(--ink);font-weight:600}
-td.cls{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+table{width:100%;border-collapse:collapse;font-size:13px;border-top:2px solid var(--ink)}
+th,td{text-align:left;vertical-align:top;padding:13px 21px 13px 0;border-bottom:1px solid var(--rule)}
+thead th{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);border-bottom:1px solid var(--ink);padding-top:8px;padding-bottom:8px}
+td.sig{font-family:var(--mono);font-size:13px;white-space:nowrap;color:var(--ink);font-weight:600}
+td.sig .lbl{display:block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);font-weight:600;margin-top:3px}
+td.cls{font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
 td.inc{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap}
 td{color:#3c424c}
 td strong{color:var(--ink);font-weight:600}
 /* Narrow screens: drop the metadata columns entirely (both header and cells,
    so columns never misalign) and let any residual table scroll internally
    instead of stretching the page. */
-@media(max-width:720px){
+@media(max-width:610px){
   td.cls,th.cls,td.inc{display:none}
   table{display:block;overflow-x:auto}
 }
 
 /* ---- terminal / code insets --------------------------------------------- */
-pre.term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);font-size:13px;line-height:1.6;padding:20px 22px;overflow-x:auto;border-radius:3px;margin:18px 0 0}
+pre.term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);font-size:13px;line-height:1.618;padding:21px;overflow-x:auto;border-radius:3px;margin:21px 0 0}
 pre.term .c{color:var(--term-faint)} pre.term .g{color:#7fbf9a} pre.term .y{color:#cfa94c}
 pre.term .r{color:#d97f6f} pre.term .w{color:#eceff4;font-weight:600} pre.term .o{color:#e08a5a}
-.fig{font-size:12.5px;color:var(--faint);margin-top:10px;max-width:70ch}
+.fig{font-size:13px;color:var(--faint);margin-top:13px;max-width:62ch}
 .fig b{color:var(--muted);font-weight:600}
-pre.conf{background:var(--inset);border:1px solid var(--rule);font-family:var(--mono);font-size:12.8px;line-height:1.6;padding:18px 20px;overflow-x:auto;border-radius:3px;color:#33383f}
+pre.conf{background:var(--inset);border:1px solid var(--rule);font-family:var(--mono);font-size:13px;line-height:1.618;padding:21px;overflow-x:auto;border-radius:3px;color:#33383f}
 pre.conf .c{color:var(--faint)} pre.conf .o{color:var(--accent)}
 
 /* ---- misc structures ----------------------------------------------------- */
-.compare{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:2px solid var(--ink)}
-.compare>div{padding:18px 22px 20px 0}
-.compare>div+div{border-left:1px solid var(--rule);padding-left:22px}
-.compare h3{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0 0 12px}
+/* comparison split 1 : phi — rustinel's column is golden-wider by design */
+.compare{display:grid;grid-template-columns:1fr 1.618fr;gap:0;border-top:2px solid var(--ink)}
+.compare>div{padding:21px 21px 21px 0}
+.compare>div+div{border-left:1px solid var(--rule);padding-left:21px}
+.compare h3{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0 0 13px}
 .compare>div+div h3{color:var(--accent)}
 .compare ul{list-style:none}
-.compare li{padding:6px 0;border-bottom:1px solid var(--rule-soft);font-size:13.5px;color:var(--muted)}
+.compare li{padding:8px 0;border-bottom:1px solid var(--rule-soft);font-size:13px;color:var(--muted)}
 .compare li:last-child{border-bottom:0}
 .compare li strong{color:var(--ink);font-weight:600}
-@media(max-width:720px){.compare{grid-template-columns:1fr}.compare>div+div{border-left:0;padding-left:0;border-top:1px solid var(--rule)}}
+@media(max-width:610px){.compare{grid-template-columns:1fr}.compare>div+div{border-left:0;padding-left:0;border-top:1px solid var(--rule)}}
 
-dl.metrics{border-top:2px solid var(--ink);margin-bottom:30px}
-dl.metrics>div{display:grid;grid-template-columns:200px 1fr;gap:24px;padding:13px 0;border-bottom:1px solid var(--rule)}
-dl.metrics dt{font-family:var(--mono);font-size:17px;font-weight:650;letter-spacing:-.01em}
+dl.metrics{border-top:2px solid var(--ink);margin-bottom:34px}
+dl.metrics>div{display:grid;grid-template-columns:1fr 2.618fr;gap:34px;padding:13px 0;border-bottom:1px solid var(--rule)}
+dl.metrics dt{font-family:var(--mono);font-size:21px;font-weight:650;letter-spacing:-.01em}
 dl.metrics dt em{font-style:normal;color:var(--accent)}
-dl.metrics dd{color:var(--muted);font-size:13.5px;align-self:center}
-@media(max-width:720px){dl.metrics>div{grid-template-columns:1fr;gap:2px}}
+dl.metrics dd{color:var(--muted);font-size:13px;align-self:center}
+@media(max-width:610px){dl.metrics>div{grid-template-columns:1fr;gap:2px}}
 
 ol.guarantees{counter-reset:g;list-style:none;border-top:2px solid var(--ink)}
-ol.guarantees li{counter-increment:g;display:grid;grid-template-columns:44px 230px 1fr;gap:18px;padding:13px 0;border-bottom:1px solid var(--rule);font-size:13.5px}
+ol.guarantees li{counter-increment:g;display:grid;grid-template-columns:34px 233px 1fr;gap:21px;padding:13px 0;border-bottom:1px solid var(--rule);font-size:13px}
 ol.guarantees li::before{content:counter(g,decimal-leading-zero);font-family:var(--mono);font-size:12px;color:var(--faint);padding-top:2px}
 ol.guarantees .t{font-weight:600}
 ol.guarantees .d{color:var(--muted)}
-@media(max-width:720px){ol.guarantees li{grid-template-columns:34px 1fr}.guarantees .d{grid-column:2}}
+@media(max-width:610px){ol.guarantees li{grid-template-columns:34px 1fr}.guarantees .d{grid-column:2}}
 
-.twocol{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start}
-@media(max-width:880px){.twocol{grid-template-columns:1fr}}
+/* code/notes split phi : 1 */
+.twocol{display:grid;grid-template-columns:1.618fr 1fr;gap:34px;align-items:start}
+@media(max-width:610px){.twocol{grid-template-columns:1fr}}
 .plain{list-style:none;border-top:2px solid var(--ink)}
-.plain li{padding:11px 0;border-bottom:1px solid var(--rule);font-size:13.5px;color:var(--muted)}
+.plain li{padding:13px 0;border-bottom:1px solid var(--rule);font-size:13px;color:var(--muted)}
 .plain li strong{display:block;color:var(--ink);font-weight:600;margin-bottom:1px}
 
-.installcols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:26px}
-@media(max-width:880px){.installcols{grid-template-columns:1fr}}
-.installcols h3{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0 0 10px}
+.installcols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:34px}
+@media(max-width:610px){.installcols{grid-template-columns:1fr}}
+.installcols h3{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin:0 0 13px}
 .installcols .note{font-size:12px;color:var(--faint);margin-top:8px}
 
-footer{border-top:2px solid var(--ink);margin-top:14px}
-footer .page{display:flex;flex-wrap:wrap;gap:8px 24px;padding-top:16px;padding-bottom:42px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+footer{border-top:2px solid var(--ink);margin-top:13px}
+footer .page{display:flex;flex-wrap:wrap;gap:8px 21px;padding-top:21px;padding-bottom:55px;font-family:var(--mono);font-size:12px;color:var(--muted)}
 footer a{text-decoration:none;border-bottom:1px solid var(--rule)}
 footer .name{color:var(--ink);font-weight:600;margin-right:auto}
 </style>
@@ -259,18 +271,18 @@ Top findings:
       compiles, never loads the code it analyzes — analysis is substring- and structure-level over unpacked
       sources, lockfiles and registry metadata.</p>
       <table>
-        <thead><tr><th>signal</th><th class="cls">class</th><th>fires when</th><th class="cls">precedent</th></tr></thead>
+        <thead><tr><th>signal</th><th>fires when</th><th class="cls">precedent</th></tr></thead>
         <tbody>
-          <tr><td class="sig">owners_changed</td><td class="cls">takeover</td><td>The owner set of a dependency changed against your recorded trust baseline. A maintainer handover is invisible in code and in every advisory feed.</td><td class="inc">xz, event-stream</td></tr>
-          <tr><td class="sig">freshly_published</td><td class="cls">takeover</td><td>The locked version was published within the last 14 days. New means unreviewed; the publication window is where a compromised release does its damage.</td><td class="inc">xz 5.6.0</td></tr>
-          <tr><td class="sig">possible_typosquat</td><td class="cls">impersonation</td><td>The name is one edit from a popular crate, corroborated against download counts so established look-alikes stay quiet. Detects Unicode homoglyphs (<code>serd&#1077;</code>, Cyrillic &#1077;) that byte-level checks cannot see.</td><td class="inc">faster_log</td></tr>
-          <tr><td class="sig">source_substitution</td><td class="cls">impersonation</td><td>A popular crate name resolves from a source that is not crates.io — dependency confusion, including a lockfile that silently redirects one pinned version to a git repository.</td><td class="inc">dep. confusion</td></tr>
-          <tr><td class="sig">suspicious_source_exfil</td><td class="cls">malicious code</td><td>Runtime source reads the project&#8217;s own files <strong>and</strong> reaches the network or handles wallet-key formats — in the same file.</td><td class="inc">faster_log</td></tr>
-          <tr><td class="sig">suspicious_exfil_domain</td><td class="cls">malicious code</td><td>A hard-coded exfiltration endpoint: <code>*.workers.dev</code>, <code>webhook.site</code>, pastebin, ngrok. Dual-use services (Telegram, Discord webhooks) require same-file secret handling, so bots and notifiers stay clean.</td><td class="inc">faster_log, xrvrv</td></tr>
-          <tr><td class="sig">env_gated_payload</td><td class="cls">malicious code</td><td>Code that detonates only under CI environment variables — env read, network fetch and process execution within a tight window. Built to hide on a laptop and fire in CI.</td><td class="inc">rustdecimal</td></tr>
-          <tr><td class="sig">obfuscated_payload</td><td class="cls">malicious code</td><td>A large embedded base64/hex blob, decoded <strong>and</strong> fed to a process spawn or dynamic loader. A blob decoded into data — a certificate, a fixture — is not flagged; the execution sink is the discriminator.</td><td class="inc">&#8212;</td></tr>
-          <tr><td class="sig">build_script_suspicious</td><td class="cls">build time</td><td>A <code>build.rs</code> that reaches the network or unpacks an opaque payload, scanned statically. Legitimate <code>cc</code>-style native builds are not flagged.</td><td class="inc">build-time droppers</td></tr>
-          <tr><td class="sig">denied_crate</td><td class="cls">policy</td><td>A crate on the operator deny list — matched across <code>-</code>/<code>_</code> variants and enforced on git and path dependencies, so it can never silently no-op.</td><td class="inc">&#8212;</td></tr>
+          <tr><td class="sig">owners_changed<span class="lbl">takeover</span></td><td>The owner set of a dependency changed against your recorded trust baseline. A maintainer handover is invisible in code and in every advisory feed.</td><td class="inc">xz, event-stream</td></tr>
+          <tr><td class="sig">freshly_published<span class="lbl">takeover</span></td><td>The locked version was published within the last 14 days. New means unreviewed; the publication window is where a compromised release does its damage.</td><td class="inc">xz 5.6.0</td></tr>
+          <tr><td class="sig">possible_typosquat<span class="lbl">impersonation</span></td><td>The name is one edit from a popular crate, corroborated against download counts so established look-alikes stay quiet. Detects Unicode homoglyphs (<code>serd&#1077;</code>, Cyrillic &#1077;) that byte-level checks cannot see.</td><td class="inc">faster_log</td></tr>
+          <tr><td class="sig">source_substitution<span class="lbl">impersonation</span></td><td>A popular crate name resolves from a source that is not crates.io — dependency confusion, including a lockfile that silently redirects one pinned version to a git repository.</td><td class="inc">dep. confusion</td></tr>
+          <tr><td class="sig">suspicious_source_exfil<span class="lbl">malicious code</span></td><td>Runtime source reads the project&#8217;s own files <strong>and</strong> reaches the network or handles wallet-key formats — in the same file.</td><td class="inc">faster_log</td></tr>
+          <tr><td class="sig">suspicious_exfil_domain<span class="lbl">malicious code</span></td><td>A hard-coded exfiltration endpoint: <code>*.workers.dev</code>, <code>webhook.site</code>, pastebin, ngrok. Dual-use services (Telegram, Discord webhooks) require same-file secret handling, so bots and notifiers stay clean.</td><td class="inc">faster_log, xrvrv</td></tr>
+          <tr><td class="sig">env_gated_payload<span class="lbl">malicious code</span></td><td>Code that detonates only under CI environment variables — env read, network fetch and process execution within a tight window. Built to hide on a laptop and fire in CI.</td><td class="inc">rustdecimal</td></tr>
+          <tr><td class="sig">obfuscated_payload<span class="lbl">malicious code</span></td><td>A large embedded base64/hex blob, decoded <strong>and</strong> fed to a process spawn or dynamic loader. A blob decoded into data — a certificate, a fixture — is not flagged; the execution sink is the discriminator.</td><td class="inc">&#8212;</td></tr>
+          <tr><td class="sig">build_script_suspicious<span class="lbl">build time</span></td><td>A <code>build.rs</code> that reaches the network or unpacks an opaque payload, scanned statically. Legitimate <code>cc</code>-style native builds are not flagged.</td><td class="inc">build-time droppers</td></tr>
+          <tr><td class="sig">denied_crate<span class="lbl">policy</span></td><td>A crate on the operator deny list — matched across <code>-</code>/<code>_</code> variants and enforced on git and path dependencies, so it can never silently no-op.</td><td class="inc">&#8212;</td></tr>
         </tbody>
       </table>
       <h3>Baseline coverage</h3>
