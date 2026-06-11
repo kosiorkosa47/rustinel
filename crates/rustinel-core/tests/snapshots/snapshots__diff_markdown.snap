@@ -20,6 +20,10 @@ expression: md
 
 - \`openssl-sys@0.9.99\` is a native/FFI dependency
 
+### Warnings
+
+- risk score increased by 16, above warn threshold 10
+
 ### Suggested actions
 
 - Review the native dependency and its build process before merging.

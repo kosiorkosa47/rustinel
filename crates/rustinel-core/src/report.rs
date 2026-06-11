@@ -203,6 +203,14 @@ pub fn to_human(report: &RustinelReport) -> String {
             out.push_str(&format!("  - {}\n", sanitize_terminal(v)));
         }
     }
+    // A `warn` decision is CAUSED by these — a report that says "warn" but
+    // shows zero reasons would leave the operator with nothing to act on.
+    if !report.policy.warnings.is_empty() {
+        out.push_str("\nPolicy warnings:\n");
+        for v in &report.policy.warnings {
+            out.push_str(&format!("  - {}\n", sanitize_terminal(v)));
+        }
+    }
     out
 }
 
@@ -328,6 +336,21 @@ pub fn to_markdown(report: &RustinelReport) -> String {
         out.push_str("### Review required\n\n");
         for v in &report.policy.review_items {
             out.push_str(&format!("- {}\n", markdown::escape(v)));
+        }
+        out.push('\n');
+    }
+    // A `warn` decision is CAUSED by these — a PR comment that says "warn"
+    // but lists zero reasons gives the reviewer nothing to act on.
+    if !report.policy.warnings.is_empty() {
+        out.push_str("### Warnings\n\n");
+        for v in report.policy.warnings.iter().take(10) {
+            out.push_str(&format!("- {}\n", markdown::escape(v)));
+        }
+        if report.policy.warnings.len() > 10 {
+            out.push_str(&format!(
+                "- …and {} more (see the JSON report)\n",
+                report.policy.warnings.len() - 10
+            ));
         }
         out.push('\n');
     }

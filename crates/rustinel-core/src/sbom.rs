@@ -61,8 +61,67 @@ fn tool_version() -> &'static str {
 }
 
 /// Package URL for a Cargo crate (Package URL spec, `cargo` type).
+///
+/// A bare `pkg:cargo/name@version` implies the DEFAULT registry (crates.io) —
+/// emitting it for a git or alternate-registry dependency would make SBOM
+/// consumers (Dependency-Track, Grype) match crates.io advisories against an
+/// artifact that did not come from crates.io. Non-default provenance is
+/// carried in the spec's standard qualifiers instead (`vcs_url` for git,
+/// `repository_url` for alternate registries).
 fn purl(pkg: &Package) -> String {
-    format!("pkg:cargo/{}@{}", pkg.id.name, pkg.id.version)
+    let base = format!("pkg:cargo/{}@{}", pkg.id.name, pkg.id.version);
+    match pkg.id.source.as_deref() {
+        // The local root component: it identifies the analyzed application.
+        None => base,
+        Some(_) if pkg.id.is_crates_io() => base,
+        Some(src) if src.starts_with("git+") => {
+            format!("{base}?vcs_url={}", pct_encode(src))
+        }
+        Some(src) => {
+            let url = src
+                .strip_prefix("registry+")
+                .or_else(|| src.strip_prefix("sparse+"))
+                .unwrap_or(src);
+            format!("{base}?repository_url={}", pct_encode(url))
+        }
+    }
+}
+
+/// Percent-encode a purl qualifier value (everything but unreserved chars).
+fn pct_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// A valid SPDX expression equivalent of a raw manifest license string: the
+/// string itself when already structurally valid, or cargo's legacy
+/// `/`-separated form rewritten with ` OR ` (its documented meaning). Anything
+/// else (`MIT & GPL`, free text) is `None` — emitting it as an SPDX
+/// *expression* would fail schema validation of the whole SBOM document.
+fn spdx_normalize(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if crate::policy::is_spdx_expression(raw) {
+        return Some(raw.to_string());
+    }
+    if raw.contains('/') {
+        let rewritten = raw
+            .split('/')
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        if crate::policy::is_spdx_expression(&rewritten) {
+            return Some(rewritten);
+        }
+    }
+    None
 }
 
 /// Advisory findings only (the ones representing real, identified vulnerabilities).
@@ -143,9 +202,15 @@ pub fn cyclonedx(lock: &LockfileModel, report: &RustinelReport) -> Value {
             if let Some(sum) = &p.checksum {
                 c["hashes"] = json!([{ "alg": "SHA-256", "content": sum }]);
             }
-            // Per-component license (CISA 2025 minimum element), as an SPDX expression.
+            // Per-component license (CISA 2025 minimum element). A valid SPDX
+            // expression goes in `expression`; anything else becomes a *named*
+            // license — an invalid expression would fail validation of the
+            // whole document.
             if let Some(lic) = licenses.get(&p.id.to_string()) {
-                c["licenses"] = json!([{ "expression": lic }]);
+                c["licenses"] = match spdx_normalize(lic) {
+                    Some(expr) => json!([{ "expression": expr }]),
+                    None => json!([{ "license": { "name": lic } }]),
+                };
             }
             c
         })
@@ -232,9 +297,11 @@ pub fn spdx(lock: &LockfileModel, report: &RustinelReport) -> Value {
 
     for (i, p) in comps.iter().enumerate() {
         let spdx_id = format!("SPDXRef-Package-{i}");
+        // `licenseDeclared` MUST be a valid SPDX expression (or NOASSERTION);
+        // a raw legacy string like `MIT/Apache-2.0` is normalized or dropped.
         let lic = licenses
             .get(&p.id.to_string())
-            .cloned()
+            .and_then(|l| spdx_normalize(l))
             .unwrap_or_else(|| "NOASSERTION".to_string());
         let mut entry = json!({
             "name": p.id.name,
@@ -391,14 +458,31 @@ pub fn openvex(_lock: &LockfileModel, report: &RustinelReport) -> Value {
         })
         .collect();
 
+    // OpenVEX consumers merge documents by `@id`, treating same-id documents as
+    // revisions of one another — a constant id would collapse unrelated scans.
+    // Derive the id from the document content (deterministic, no clock/random).
+    let fingerprint = fnv1a_hex(&format!(
+        "{timestamp}|{}",
+        serde_json::to_string(&statements).unwrap_or_default()
+    ));
     json!({
         "@context": "https://openvex.dev/ns/v0.2.0",
-        "@id": "https://rustinel.dev/vex/scan",
+        "@id": format!("https://rustinel.dev/vex/{fingerprint}"),
         "author": format!("{TOOL}-{}", tool_version()),
         "timestamp": timestamp,
         "version": 1,
         "statements": statements,
     })
+}
+
+/// FNV-1a hex of a string — deterministic, content-derived document ids.
+fn fnv1a_hex(s: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
 }
 
 fn split_pkg(pkg: &str) -> (&str, &str) {
@@ -645,5 +729,83 @@ mod tests {
         let a = render(ExportFormat::CycloneDx, &lock, &report).unwrap();
         let b = render(ExportFormat::CycloneDx, &lock, &report).unwrap();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn purl_carries_non_default_provenance() {
+        // A bare pkg:cargo purl implies crates.io; git and alternate-registry
+        // deps must carry their provenance so SBOM consumers don't match
+        // crates.io advisories against a different artifact.
+        let mut git = pkg("serde", "1.0.197", false);
+        git.id.source = Some("git+https://github.com/attacker/serde#abc123".into());
+        let p = purl(&git);
+        assert!(
+            p.starts_with("pkg:cargo/serde@1.0.197?vcs_url=git%2B"),
+            "git purl: {p}"
+        );
+        let mut alt = pkg("internal-util", "0.3.0", false);
+        alt.id.source = Some("registry+https://crates.example.com/index".into());
+        let p = purl(&alt);
+        assert!(
+            p.contains("?repository_url=https%3A%2F%2Fcrates.example.com%2Findex"),
+            "alt-registry purl: {p}"
+        );
+        // crates.io stays bare.
+        assert_eq!(purl(&pkg("serde", "1.0.0", false)), "pkg:cargo/serde@1.0.0");
+    }
+
+    #[test]
+    fn invalid_license_string_never_emitted_as_expression() {
+        let (lock, mut report) = fixture();
+        for (pkg_name, lic) in [("time", "MIT/Apache-2.0"), ("serde", "MIT & BSD style")] {
+            report.findings.push(RiskSignal {
+                id: "license_detected".into(),
+                package: format!(
+                    "{pkg_name}@{}",
+                    if pkg_name == "time" {
+                        "0.2.22"
+                    } else {
+                        "1.0.0"
+                    }
+                ),
+                severity: Severity::Info,
+                weight: 0,
+                confidence: 1.0,
+                evidence: vec![Evidence::new(
+                    "manifest",
+                    format!("declared license: {lic}"),
+                )],
+                recommendation: String::new(),
+            });
+        }
+        let cdx = cyclonedx(&lock, &report);
+        let comps = cdx["components"].as_array().unwrap();
+        // Legacy `/` normalizes to a valid OR expression.
+        let time = comps.iter().find(|c| c["name"] == "time").unwrap();
+        assert_eq!(time["licenses"][0]["expression"], "MIT OR Apache-2.0");
+        // Free text falls back to a *named* license, never an expression.
+        let serde = comps.iter().find(|c| c["name"] == "serde").unwrap();
+        assert!(serde["licenses"][0]["expression"].is_null());
+        assert_eq!(serde["licenses"][0]["license"]["name"], "MIT & BSD style");
+        // SPDX: normalized or NOASSERTION, never raw legacy.
+        let spdx_doc = spdx(&lock, &report);
+        let pkgs = spdx_doc["packages"].as_array().unwrap();
+        let time_pkg = pkgs.iter().find(|p| p["name"] == "time").unwrap();
+        assert_eq!(time_pkg["licenseDeclared"], "MIT OR Apache-2.0");
+        let serde_pkg = pkgs.iter().find(|p| p["name"] == "serde").unwrap();
+        assert_eq!(serde_pkg["licenseDeclared"], "NOASSERTION");
+    }
+
+    #[test]
+    fn openvex_id_is_unique_per_document() {
+        let (lock, report) = fixture();
+        let a = openvex(&lock, &report);
+        // Identical input -> identical id (deterministic)...
+        assert_eq!(a["@id"], openvex(&lock, &report)["@id"]);
+        // ...but different content -> different id (consumers merge by @id).
+        let mut other = report;
+        other.policy.ignored_advisories = vec!["RUSTSEC-2020-0071".into()];
+        let b = openvex(&lock, &other);
+        assert_ne!(a["@id"], b["@id"], "distinct scans must not share an @id");
     }
 }

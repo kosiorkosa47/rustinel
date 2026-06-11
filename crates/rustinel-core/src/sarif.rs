@@ -116,9 +116,18 @@ fn level_for(severity: Severity) -> &'static str {
     }
 }
 
+// Control characters forge structure; bidi/zero-width spoofers (category Cf,
+// NOT control) can visually reorder or hide text in the code-scanning UI —
+// both are flattened.
 fn flatten(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
+        .map(|c| {
+            if c.is_control() || crate::markdown::is_text_spoofing(c) {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -135,7 +144,11 @@ pub fn build(report: &RustinelReport) -> SarifLog {
                     text: rule_name(finding),
                 },
                 help: SarifText {
-                    text: flatten(&finding.recommendation),
+                    // SARIF 2.1.0 requires a non-empty message string.
+                    text: match flatten(finding.recommendation.trim()) {
+                        s if s.is_empty() => "Review this finding.".to_string(),
+                        s => s,
+                    },
                 },
             });
     }
